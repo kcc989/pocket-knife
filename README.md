@@ -1,13 +1,13 @@
 <p align="center">
-  <img src="assets/cover.svg" alt="jeval, harnesses for decision models. A decision model picks the next step from a menu that code lists." width="880">
+  <img src="assets/cover.svg" alt="jeval: a framework for building decision-model harnesses for any kind of task" width="880">
 </p>
 
 # jeval
 
-jeval is a framework for building harnesses around decision models, the classifiers that answer typed questions about a
-structured state, such as TypeSafe's Jev. At each step of a task, code lists the steps that make sense right now and
-the model picks one. Code runs the chosen step and adds what it found to the state, and the loop goes on until the
-model can answer the task's questions.
+jeval is a framework for building decision-model harnesses for any kind of task. A decision model is a classifier
+that answers typed questions about what it has been shown, such as TypeSafe's Jev. At each step, your program offers
+the model a short list of possible next steps and the model picks one. Your program carries out that step and shows
+the model what it found, and this repeats until the model can answer the task's questions.
 
 The task itself comes from a domain, which you write in a few small pieces of TypeScript. A domain defines the
 workspace of one case and the actions that can be taken in it. It also sets the questions the model answers at the end
