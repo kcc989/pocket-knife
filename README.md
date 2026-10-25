@@ -1,113 +1,130 @@
+<p align="center">
+  <img src="assets/cover.svg" alt="jeval, harnesses for decision models. A decision model picks the next step from a menu that code lists." width="880">
+</p>
+
 # jeval
 
-jeval is a harness for decision models, such as TypeSafe's Jev, that lets them work through multi-step tasks. At
-each step, code lists the steps that are allowed, the model picks one, and code runs it, until the model can answer
-typed questions about the case.
+jeval is a framework for building harnesses around decision models, the classifiers that answer typed questions about a
+structured state, such as TypeSafe's Jev. At each step of a task, code lists the steps that make sense right now and
+the model picks one. Code runs the chosen step and adds what it found to the state, and the loop goes on until the
+model can answer the task's questions.
 
-Grading an answer against a rubric is the first use, as the `legal-judge` domain: the model reads the answer, chooses
-which documents to read, which terms to search and what to compare, then answers one yes-or-no question per rubric
-item. The same loop can route a request, sort a report or decide whether a case needs a person.
-
-## Install
-
-jeval needs Node.js 22.13 or newer and pnpm. Ingesting PDF scans, legacy Word files and PPM images also needs
-`pdftoppm` (Poppler), `soffice` (LibreOffice) and `pnmtopng` (Netpbm).
-
-```bash
-git clone https://github.com/osolmaz/jeval
-cd jeval
-pnpm install
-```
+The task itself comes from a domain, which you write in a few small pieces of TypeScript. A domain defines the
+workspace of one case and the actions that can be taken in it. It also sets the questions the model answers at the end
+and how the state is shown to the model. jeval runs the same loop for every domain and keeps the model's probability
+for every option on every menu. It fits the state into the model's window and writes a trace of every step, which can
+be replayed or forked. jeval ships one domain, `legal-judge`, which grades answers to legal tasks against a rubric. The
+same loop fits any task where a model should look around before it decides, such as routing a support ticket after
+reading its logs or deciding whether a report needs a person.
 
 ## Install
 
-As a dependency, pinned to a commit; installing builds it, and the `jeval` command runs the build:
+jeval needs Node.js 22.13 or newer and pnpm. To use it as a library or command in another project, add it pinned to a
+commit; installing builds it.
 
 ```bash
 pnpm add github:osolmaz/jeval#<commit>
 ```
 
-## Use
+To work on jeval itself, clone it and run `pnpm install`. The `legal-judge` domain also needs Poppler and LibreOffice
+to read PDF scans and old Word files, and Netpbm to scale images.
 
-A case starts as an input folder with `request.md`, `rubric.json` (`{"items": [{"id", "category", "text"}]}`), the
-task's files under `documents/` and the answer's files under `answer/`. `ingest` turns it into a case folder:
+## Write a domain
+
+A domain is a folder in `src/domains/`. Its actions each list the options that make sense in the current state and
+say what running one finds. This domain routes a support ticket and lets the model read the ticket's logs first:
+
+```ts
+import { action, type Domain } from "../../core/index.ts";
+
+interface Ticket {
+  readonly text: string;
+  readonly logs: Readonly<Record<string, string>>;
+}
+
+const readLog = action<Ticket, string>({
+  name: "read-log",
+  options: (state) => Object.keys(state.workspace.logs).map((name) => ({ key: name, text: `Read ${name}`, arg: name })),
+  observe: (ticket, name) => ({ source: name, text: ticket.logs[name] ?? "" }),
+});
+
+export const triage: Domain<Ticket> = {
+  name: "triage",
+  version: "0.1.0",
+  actions: [readLog],
+  stop: "Stop reading: the evidence is enough",
+  choose: "Which log should be read next to route this ticket?",
+  questions: () => [
+    {
+      kind: "choice",
+      id: "team",
+      instructions: "Which team should handle the ticket?",
+      choices: { billing: "Billing", infra: "Infrastructure", app: "Application" },
+    },
+  ],
+  start: (ticket) =>
+    Promise.resolve([{ action: "start", key: "ticket", observation: { source: "ticket", text: ticket.text } }]),
+  view: (state) => ({
+    state: { evidence: state.log.map(({ observation }) => ({ source: observation.source, text: observation.text })) },
+    images: [],
+    omitted: [],
+  }),
+};
+```
+
+The model reads the ticket and opens logs one step at a time until it picks stop, then answers the question. Each question has a type, here a `choice`. Every answer comes with the model's probabilities. Any
+classifier model that pi-ai lists can decide, with its key from the environment:
+
+```ts
+import { builtinModels } from "@earendil-works/pi-ai/providers/all";
+import { run } from "../../core/index.ts";
+import { piAiDecider } from "../../models/pi-ai.ts";
+
+const decider = piAiDecider("typesafe/jev-latest", { registry: builtinModels(), apiKey: process.env.TYPESAFE_API_KEY });
+const result = await run(triage, ticket, decider, { case: "ticket-1" });
+```
+
+`result.answers` holds the answers. `result.trace` holds every menu the model saw with the probability it gave each
+option, and what each step found. A domain that needs more than one round of questions, such as asking about each part
+of an item before deciding the item, adds a `judge` function that asks in stages. `src/domains/legal-judge/` is the
+complete example, and [docs/2026-10-25-jeval-plan.md](docs/2026-10-25-jeval-plan.md) explains the design.
+
+## Legal judge
+
+The `legal-judge` domain grades a saved answer to a legal task. The model reads the answer and gathers what it needs from
+the task's documents one step at a time. Then it answers two questions per rubric item, whether the answer meets it and
+whether it misses or contradicts any requirement. An item passes when both checks
+pass. Every text the model reads is in a judge file, `judges/legal-judge.json`, so a variant of the judge is another
+file passed with `--judge`.
+
+A case starts as an input folder that holds the request in `request.md` and the rubric in `rubric.json`
+(`{"items": [{"id", "category", "text"}]}`), with the task's files under `documents/` and the answer's files under
+`answer/`. `ingest` turns it into a case folder, and
+`run` grades case folders with a pi-ai classifier model whose key it reads from `PROVIDER_API_KEY`, for example
+`TYPESAFE_API_KEY` for `typesafe/jev-latest`:
 
 ```bash
 node src/cli/main.ts ingest input/case-1 cases/case-1
+node src/cli/main.ts run cases/case-1 --out results --model typesafe/jev-latest
 ```
 
-`run` grades the cases of an eval set, or case folders named on the command line, with a classifier model that pi-ai
-lists, and reads its API key from `PROVIDER_API_KEY`, for example `TYPESAFE_API_KEY` for `typesafe/jev-latest`. It writes one run folder:
+A run writes one folder. `run.json` records what ran, including the judge's hash and the jeval commit. Each case keeps
+its answers and a trace of every step, and `requests.jsonl` keeps every request exactly as the model received it. A
+stopped run goes on in the same folder.
 
-```text
-results/
-  run.json               what ran: domain, version, judge, model, limits, set, jeval commit, evidence source, times, totals
-  cases/<id>/
-    result.json          the case's answers, or its error
-    trace.jsonl          every menu, choice, observation and answer, in order
-    requests.jsonl       every request sent to the model, as sent, with its answers and usage
-```
-
-An eval set is a file kept with its private data, never in this repository. It names the set, the folder of its case
-folders and its labels file, both relative to the set file, and the ids of the cases it schedules:
-
-```json
-{ "name": "quick", "cases": "cases", "labels": "labels.jsonl", "ids": ["case-1", "case-2"] }
-```
-
-Labels are JSON Lines of `{"id", "items": [{"id", "pass"}]}`.
+To measure a judge, an eval set file names the case folders and the scheduled case ids. It also points to a labels
+file in JSON Lines (`{"id", "items": [{"id", "pass"}]}`). `score` checks a run against the set's labels.
+`rejudge` asks another judge file or model over the evidence an earlier run gathered, for about a third of the cost
+of a new run. `compare` then scores runs side by side on the cases that all of them answered:
 
 ```bash
-node src/cli/main.ts run --set sets/quick.json --out results --model typesafe/jev-latest
-```
-
-The judge is a file, `judges/legal-judge.json` unless `--judge` names another. It holds everything the model reads
-apart from the case: the description of the process and of each stage, the rules for applying a rubric, the questions
-asked about every rubric item, and the limits of evidence gathering. `{item}` in a question becomes the item's label and
-text. Each question counts for the item or against it, and an item passes only when every question for it says yes
-and every question against it says no. A judge is named by the SHA-256 of its parsed content, which appears in the run's
-version, its trace and `run.json`; to try other texts or questions, copy the file and run with `--judge`.
-
-A stopped run goes on in the same folder and skips the cases that are done; a folder that holds a run of another
-domain, judge, model or commit is refused. `replay` runs a case again from its trace; with `--fork <steps>`, it
-repeats that many recorded steps and lets the model go on from there. `score` compares a run with a set's labels, on
-every case the set schedules:
-
-```bash
-node src/cli/main.ts replay cases/case-1 results/cases/case-1/trace.jsonl
-node src/cli/main.ts score results --set sets/quick.json
-```
-
-`rejudge` judges the cases of a run again with another judge file or model, over the evidence that run gathered: it
-repeats each case's recorded steps and sends only the judging to the model, into a new run folder whose `run.json` names
-the run it took the evidence from. `compare` scores runs side by side against the same labels, on the cases that every
-run answered:
-
-```bash
+node src/cli/main.ts run --set sets/quick.json --out results
 node src/cli/main.ts rejudge --set sets/quick.json --from results --out results-strict --judge judges/strict.json
 node src/cli/main.ts compare results results-strict --set sets/quick.json
 ```
 
-## Write a domain
-
-A domain declares actions, questions and a view; the core runs the loop. An action lists the options that make sense
-in the current state and says what each one finds:
-
-```ts
-export const search = action<Workspace, Term>({
-  name: "search",
-  options: (state) =>
-    state.workspace.terms.map((term) => ({
-      key: term.term,
-      text: `Find the passages that mention “${term.term}”`,
-      arg: term,
-    })),
-  observe: (workspace, term) => ({ source: `search for “${term.term}”`, text: workspace.search(term.term) }),
-});
-```
-
-The `legal-judge` domain in `src/domains/legal-judge/` is the complete example. The design is in
-[docs/2026-10-25-jeval-plan.md](docs/2026-10-25-jeval-plan.md).
+`replay` runs a case again from its trace, and with `--fork <steps>` it repeats that many recorded steps and lets the
+model go on from there.
 
 ## License
 
