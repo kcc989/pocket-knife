@@ -4,11 +4,23 @@
 
 # Switch
 
-Switch is a framework for building decision-model harnesses for any kind of task. A decision model is a classifier
-that answers typed questions about what it has been shown, such as TypeSafe's Jev. At each step, your program offers
-the model a short list of possible next steps and the model picks one. Your program carries out that step and shows
-the model what it found, and this repeats until the model can answer the task's questions. The name comes from a
-railway switch, where one track splits into a few: your program lays the tracks, and the model sets the switch.
+Switch is a framework for building decision-model harnesses for any kind of task.
+
+A decision model reads a state, such as text or a JSON object, and answers typed questions about it. It picks one of a
+list of options, rates the state on a scale, or gives the probability that a statement is true, and every answer comes
+with the model's probabilities. It writes no text. TypeSafe calls them
+[System One models](https://docs.typesafe.ai/concepts/system-one), and its Jev was the first. Open models followed:
+llama.cpp [serves decision models](https://huggingface.co/blog/ggml-org/decision-models-in-llamacpp) through the same
+API as Jev, and the Hugging Face Hub tags thousands of models as
+[`decision-model`](https://huggingface.co/models?other=decision-model). The community
+[Decision Index](https://huggingface.co/spaces/multimodalart/jev-decision-index) on Hugging Face compares many of
+them with Jev on tasks such as tool use, retrieval, reasoning and games.
+
+Decision models are fast and cheap, but they cannot write a tool call, so the usual agent loop does not fit them.
+Switch gives them a loop that does. At each step, your program offers the model a short list of possible next steps
+and the model picks one. Your program carries out that step and shows the model what it found, and this repeats until
+the model can answer the task's questions. The name comes from a railway switch, where one track splits into a few:
+your program lays the tracks, and the model sets the switch.
 
 The task itself comes from a domain, which you write in a few small pieces of TypeScript. A domain defines the
 workspace of one case and the actions that can be taken in it. It also sets the questions the model answers at the end
