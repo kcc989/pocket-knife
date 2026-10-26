@@ -39,8 +39,15 @@ commit; installing builds it.
 pnpm add github:osolmaz/switch#<commit>
 ```
 
-To work on Switch itself, clone it and run `pnpm install`. The `legal-judge` domain also needs Poppler and LibreOffice
-to read PDF scans and old Word files, and Netpbm to scale images.
+To work on Switch itself, clone it and run `pnpm install`. A domain that needs other programs lists them in its own
+README.
+
+## Domains
+
+Each domain has a README that says what it does, what else it needs installed and how to run it.
+
+- [Legal judge](src/domains/legal-judge/README.md) (`legal-judge`) grades a saved answer to a legal task against the
+  task's rubric.
 
 ## Write a domain
 
@@ -101,43 +108,6 @@ const result = await run(triage, ticket, decider, { case: "ticket-1" });
 option, and what each step found. A domain that needs more than one round of questions, such as asking about each part
 of an item before deciding the item, adds a `judge` function that asks in stages. `src/domains/legal-judge/` is the
 complete example, and [docs/2026-10-25-switch-plan.md](docs/2026-10-25-switch-plan.md) explains the design.
-
-## Legal judge
-
-The `legal-judge` domain grades a saved answer to a legal task. The model reads the answer and gathers what it needs from
-the task's documents one step at a time. Then it answers two questions per rubric item, whether the answer meets it and
-whether it misses or contradicts any requirement. An item passes when both checks
-pass. Every text the model reads is in a judge file, `judges/legal-judge.json`, so a variant of the judge is another
-file passed with `--judge`.
-
-A case starts as an input folder that holds the request in `request.md` and the rubric in `rubric.json`
-(`{"items": [{"id", "category", "text"}]}`), with the task's files under `documents/` and the answer's files under
-`answer/`. `ingest` turns it into a case folder, and
-`run` grades case folders with a pi-ai classifier model whose key it reads from `PROVIDER_API_KEY`, for example
-`TYPESAFE_API_KEY` for `typesafe/jev-latest`:
-
-```bash
-node src/cli/main.ts ingest input/case-1 cases/case-1
-node src/cli/main.ts run cases/case-1 --out results --model typesafe/jev-latest
-```
-
-A run writes one folder. `run.json` records what ran, including the judge's hash and the Switch commit. Each case keeps
-its answers and a trace of every step, and `requests.jsonl` keeps every request exactly as the model received it. A
-stopped run goes on in the same folder.
-
-To measure a judge, an eval set file names the case folders and the scheduled case ids. It also points to a labels
-file in JSON Lines (`{"id", "items": [{"id", "pass"}]}`). `score` checks a run against the set's labels.
-`rejudge` asks another judge file or model over the evidence an earlier run gathered, for about a third of the cost
-of a new run. `compare` then scores runs side by side on the cases that all of them answered:
-
-```bash
-node src/cli/main.ts run --set sets/quick.json --out results
-node src/cli/main.ts rejudge --set sets/quick.json --from results --out results-strict --judge judges/strict.json
-node src/cli/main.ts compare results results-strict --set sets/quick.json
-```
-
-`replay` runs a case again from its trace, and with `--fork <steps>` it repeats that many recorded steps and lets the
-model go on from there.
 
 ## License
 

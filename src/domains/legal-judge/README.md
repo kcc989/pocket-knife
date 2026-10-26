@@ -1,0 +1,59 @@
+# Legal judge
+
+The `legal-judge` domain grades a saved answer to a legal task against the task's rubric. The model reads the answer
+and gathers what it needs from the task's documents one step at a time. Then it answers two questions per rubric item:
+whether the answer meets it, and whether it misses or contradicts any requirement. An item passes when both checks
+pass. Every text the model reads is in a judge file, [`judges/legal-judge.json`](../../../judges/legal-judge.json), so
+a variant of the judge is another file passed with `--judge`.
+
+## Install
+
+Install Switch first, as the [main README](../../../README.md#install) says. `ingest` also calls three programs, which
+must be on the `PATH`. It calls each one only for the files that need it:
+
+- Poppler's `pdftoppm` renders PDF pages that have no text layer, such as scans, as images.
+- LibreOffice's `soffice` reads old Word `.doc` files.
+- Netpbm decodes and scales images with `pngtopnm`, `jpegtopnm`, `giftopnm`, `pamscale` and `pnmtopng`.
+
+On Debian or Ubuntu:
+
+```bash
+sudo apt install poppler-utils libreoffice-writer netpbm
+```
+
+`run` and the other commands read case folders that `ingest` already made, so they need none of these programs.
+
+## Grade cases
+
+A case starts as an input folder that holds the request in `request.md` and the rubric in `rubric.json`
+(`{"items": [{"id", "category", "text"}]}`), with the task's files under `documents/` and the answer's files under
+`answer/`. `ingest` turns it into a case folder, and `run` grades case folders with a pi-ai classifier model whose key
+it reads from `PROVIDER_API_KEY`, for example `TYPESAFE_API_KEY` for `typesafe/jev-latest`. Run the commands from the
+repository root:
+
+```bash
+node src/cli/main.ts ingest input/case-1 cases/case-1
+node src/cli/main.ts run cases/case-1 --out results --model typesafe/jev-latest
+```
+
+A run writes one folder. `run.json` records what ran, including the judge's hash and the Switch commit. Each case keeps
+its answers and a trace of every step, and `requests.jsonl` keeps every request exactly as the model received it. A
+stopped run goes on in the same folder.
+
+## Measure a judge
+
+To measure a judge, an eval set file names the case folders and the scheduled case ids. It also points to a labels
+file in JSON Lines (`{"id", "items": [{"id", "pass"}]}`). `score` checks a run against the set's labels. `rejudge`
+asks another judge file or model over the evidence an earlier run gathered, for about a third of the cost of a new
+run. `compare` then scores runs side by side on the cases that all of them answered:
+
+```bash
+node src/cli/main.ts run --set sets/quick.json --out results
+node src/cli/main.ts rejudge --set sets/quick.json --from results --out results-strict --judge judges/strict.json
+node src/cli/main.ts compare results results-strict --set sets/quick.json
+```
+
+## Replay a case
+
+`replay` runs a case again from its trace, and with `--fork <steps>` it repeats that many recorded steps and lets the
+model go on from there.
