@@ -33,6 +33,7 @@
 
 - Pin every dependency to an exact version and commit `pnpm-lock.yaml`. Add a dependency only when Node and the
   existing ones cannot do the job.
+- Write the project's name in lowercase, switch, also at the start of a sentence and in headings.
 - Follow [SimpleDoc](https://github.com/osolmaz/SimpleDoc) for Markdown files: a doc tied to a date goes in `docs/`
   as `YYYY-MM-DD-lowercase-title.md` with `title`, `author` and `date` frontmatter.
 - Write commit messages and pull request titles as Conventional Commits. Add `[skip ci]` to documentation-only
