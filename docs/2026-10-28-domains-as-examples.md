@@ -506,6 +506,10 @@ The fourth PR follows the plan above, with these differences and additions:
 
 Status: planned, not built.
 
+**Rule.** Everything that goes to a decision model or comes back from one follows pi-ai's standard forms, as far as
+switch can use them: the request, the questions, the answers, the result and the usage. switch reshapes only where it
+must, and the plan says why at each place.
+
 The view function gives exactly what the decision model reads, and switch adds only the questions. Nothing else
 changes the request on its way to the model.
 
@@ -515,8 +519,10 @@ each of the three decision model APIs: System One, OpenAI Decisions, and chat mo
 it therefore runs on every classifier model that pi-ai lists. System One can say more, such as a string state or a
 score's probabilities, but no domain needs that today. A System One decider can come later if one does.
 
-Each field that takes its name from pi-ai's `state`, `images` and `questions` gets the prefix `decision`, so that
-"state" in switch still means only Sₜ.
+Each field that carries pi-ai's content takes the prefix `decision`: `decisionState`, `decisionImages` and
+`decisionQuestions` in the request, and `decisionAnswers` and `decisionUsage` in the result. So "state" in switch still
+means only Sₜ, and the names show which data is pi-ai's. The fields about the call itself keep pi-ai's names: `api`,
+`provider`, `model`, `stopReason`, `errorMessage` and `timestamp`.
 
 ```ts
 /** One request to the decision model, in the form of pi-ai's ClassifierContext. */
@@ -560,18 +566,57 @@ export type Answer =
   | { readonly type: "score"; readonly score: number; readonly confidence: number };
 ```
 
+The decider gives back pi-ai's `ClassifierResult` as it is, with two fields of switch's own:
+
+```ts
+/** The decision model's result, in the form of pi-ai's ClassifierResult. */
+export interface DecisionResult {
+  /** pi-ai's `answers`, by question id. Empty when `stopReason` is not "stop". */
+  readonly decisionAnswers: Readonly<Record<string, Answer>>;
+  /** pi-ai's `usage`; null when the API reports no token counts. */
+  readonly decisionUsage: DecisionUsage | null;
+  readonly api: string;
+  readonly provider: string;
+  /** The model that was asked. */
+  readonly model: string;
+  readonly stopReason: "stop" | "error" | "aborted";
+  readonly errorMessage: string | null;
+  readonly timestamp: number;
+  /** switch's own: the error says that the request was larger than the model's window, so a smaller view may fit. */
+  readonly tooLong: boolean;
+  /** switch's own: how long the call took, which pi-ai does not report. */
+  readonly milliseconds: number;
+}
+
+/** pi-ai's `Usage`: token counts, and their cost in US dollars at the model's catalog price. */
+export interface DecisionUsage {
+  readonly input: number;
+  readonly output: number;
+  readonly cacheRead: number;
+  readonly cacheWrite: number;
+  readonly totalTokens: number;
+  readonly cost: {
+    readonly input: number;
+    readonly output: number;
+    readonly cacheRead: number;
+    readonly cacheWrite: number;
+    readonly total: number;
+  };
+}
+```
+
 A request is made like this:
 
 1. **Pick.** switch turns the offered choices and stop into one choice question. It calls
    `view(Sₜ₋₁, "choose", τ)` and sends the view with that question.
 2. **Answers.** switch splits the domain's questions into batches. For each batch, it calls `view(S, "answer", τ)` and
    sends the view with the batch.
-3. **Window.** When the model's API says that a request was too long, switch calls the view function again with a
-   smaller τ, as it does now.
+3. **Window.** When a result has `tooLong`, switch calls the view function again with a smaller τ, as it does now.
 4. **Decider.** The pi-ai decider passes the request to pi-ai as it is: `decisionState` as `state`,
-   `decisionQuestions` as `questions`, and each image as `{ type: "image", data, mimeType }`. pi-ai's answers come back
-   unchanged.
-5. **Record.** `requests.jsonl` keeps each decision request as it was sent, with each image by its label.
+   `decisionQuestions` as `questions`, and each image as `{ type: "image", data, mimeType }`. It gives back pi-ai's
+   result as it is, with `tooLong` and `milliseconds` added.
+5. **Record.** `requests.jsonl` keeps each decision request as it was sent, with each image by its label, and its
+   decision result.
 
 What changes:
 
@@ -584,6 +629,20 @@ What changes:
   question. A question's id becomes its key, in `questions()` and in `decisionQuestions`, in place of an `id` field.
 - **Answers.** A choice answer always has its `confidence`, as pi-ai always gives it. The rest of the answers already
   have pi-ai's shapes.
+- **Result.** `DecisionResult` takes pi-ai's form, as above. Today it is switch's own: `ok` in place of `stopReason`,
+  `message` in place of `errorMessage`, and `failure: "window" | "provider"`, which switch guesses from the message. It
+  also drops `api`, `provider`, `model` and `timestamp`. `tooLong` replaces `failure` and is the one guess that stays,
+  because pi-ai has no field for it and switch needs it to retry with a smaller view.
+- **Usage.** `DecisionUsage` is pi-ai's usage. Today switch keeps only `inputTokens`, under its own name, so a run
+  records no output, cache or cost counts, although pi-ai computes the cost. The trace's `pick`, `stage` and
+  `answers` entries record the decision usage and the milliseconds. `run.json`'s totals sum the decision usage,
+  cost included, in place of `inputTokens` alone.
+- **Requests file.** Each line of `requests.jsonl` holds the decision request and the decision result. Today it holds
+  switch's own request and result shapes.
+- **Pick.** The pick keeps its short labels, `o1`, `o2` and so on, and `stop`, because choice keys can be long, such
+  as `move:12:e2e4`, and the labels keep the request small. switch maps the answer's labels back to the choices' keys,
+  and this mapping is the one reshape of an answer that stays. The trace's `pick` entry takes the choice answer's
+  field names: `choice` in place of `key`, `probabilities` by choice key, and `confidence`, which becomes required.
 - **Answer stages.** `AskOptions.json` and `AskOptions.extra` go. A stage can give its own view function instead,
   which switch fits to the window like the domain's. legal-judge's check stage builds its view from the normal view
   and its own texts.
