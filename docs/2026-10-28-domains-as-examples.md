@@ -506,20 +506,27 @@ The fourth PR follows the plan above, with these differences and additions:
 
 Status: planned, not built.
 
-The view function gives exactly what the decision model reads, in the form of the decision model API that
-[DECISION_MODEL_API.md](DECISION_MODEL_API.md) describes. switch then adds the questions, and nothing else changes the
-request on its way to the model. Each name that comes from the API takes the prefix `decision`, so that "state" in
-switch still means only Sₜ: the API's `state` becomes `decisionState`.
+The view function gives exactly what the decision model reads, and switch adds only the questions. Nothing else
+changes the request on its way to the model.
+
+The request, its questions and its answers follow pi-ai's classifier interface, which
+[DECISION_MODEL_API.md](DECISION_MODEL_API.md#pi-ais-classifier-interface) describes. pi-ai sends that one form to
+each of the three decision model APIs: System One, OpenAI Decisions, and chat models used as classifiers. A request in
+it therefore runs on every classifier model that pi-ai lists. System One can say more, such as a string state or a
+score's probabilities, but no domain needs that today. A System One decider can come later if one does.
+
+Each field that takes its name from pi-ai's `state`, `images` and `questions` gets the prefix `decision`, so that
+"state" in switch still means only Sₜ.
 
 ```ts
-/** One request to the decision model, in the API's form. */
+/** One request to the decision model, in the form of pi-ai's ClassifierContext. */
 export interface DecisionRequest {
-  /** The API's `state`: what the model reads, as a string, a JSON object or an array. */
-  readonly decisionState: string | JsonObject | readonly Json[];
-  /** The images that the model reads with it. */
+  /** pi-ai's `state`: what the model reads, as a JSON object. */
+  readonly decisionState: JsonObject;
+  /** pi-ai's `images`: the images that the model reads with it. */
   readonly decisionImages: readonly Image[];
-  /** The API's `questions`: the questions by id, in the API's form. */
-  readonly decisionQuestions: Readonly<Record<string, DecisionQuestion>>;
+  /** pi-ai's `questions`: the questions by id. */
+  readonly decisionQuestions: Readonly<Record<string, Question>>;
 }
 
 /** What the view function gives: the decision request without its questions, which switch adds. */
@@ -527,6 +534,30 @@ export type View = Omit<DecisionRequest, "decisionQuestions">;
 
 // In StateMachine, with the same arguments as now:
 view?(state: S, purpose: "choose" | "answer", tokens: number): Promise<View>;
+questions?(): Readonly<Record<string, Question>>;
+```
+
+The questions and the answers take pi-ai's shapes exactly:
+
+```ts
+export type Question =
+  | {
+      readonly type: "bool";
+      readonly instructions: string;
+      readonly criteria: { readonly true: string; readonly false: string };
+    }
+  | { readonly type: "choice"; readonly instructions: string; readonly criteria: Readonly<Record<string, string>> }
+  | { readonly type: "score"; readonly instructions: string; readonly criteria: readonly string[] };
+
+export type Answer =
+  | { readonly type: "bool"; readonly probability: number }
+  | {
+      readonly type: "choice";
+      readonly choice: string;
+      readonly probabilities: Readonly<Record<string, number>>;
+      readonly confidence: number;
+    }
+  | { readonly type: "score"; readonly score: number; readonly confidence: number };
 ```
 
 A request is made like this:
@@ -537,31 +568,32 @@ A request is made like this:
    sends the view with the batch.
 3. **Window.** When the model's API says that a request was too long, switch calls the view function again with a
    smaller τ, as it does now.
-4. **Decider.** The decider turns the request into its provider's body: `decisionState` into `state`,
-   `decisionImages` into an `images` list or `assets`, and `decisionQuestions` into `questions`.
+4. **Decider.** The pi-ai decider passes the request to pi-ai as it is: `decisionState` as `state`,
+   `decisionQuestions` as `questions`, and each image as `{ type: "image", data, mimeType }`. pi-ai's answers come back
+   unchanged.
 5. **Record.** `requests.jsonl` keeps each decision request as it was sent, with each image by its label.
 
 What changes:
 
-- **View.** `json` becomes `decisionState`, which may also be a string or an array, and `images` becomes
-  `decisionImages`. `omitted` and the trace's note "the view left out" go: the requests file shows what the model
-  read, and a domain that cuts something writes that into `decisionState` when the model should know.
-- **Images.** `Image` keeps its label, media type and base64 data, because the providers take images in different
-  forms. The decider builds each provider's form.
-- **Questions.** The questions take the API's form: the yes-or-no type is `noul` in place of `bool`, and `criteria`
-  replaces `yes` and `no`, `choices` and `levels`. A question's id becomes its key in `decisionQuestions`, in place of
-  an `id` field.
+- **View.** `json` becomes `decisionState`, and `images` becomes `decisionImages`. `omitted` and the trace's note "the
+  view left out" go: the requests file shows what the model read, and a domain that cuts something writes that into
+  `decisionState` when the model should know.
+- **Images.** `Image` keeps its label next to the media type and the base64 data, so that the requests file can name
+  each image without its bytes. The decider leaves the label out.
+- **Questions.** `criteria` replaces `yes` and `no`, `choices` and `levels`, with `true` and `false` for a yes-or-no
+  question. A question's id becomes its key, in `questions()` and in `decisionQuestions`, in place of an `id` field.
+- **Answers.** A choice answer always has its `confidence`, as pi-ai always gives it. The rest of the answers already
+  have pi-ai's shapes.
 - **Answer stages.** `AskOptions.json` and `AskOptions.extra` go. A stage can give its own view function instead,
   which switch fits to the window like the domain's. legal-judge's check stage builds its view from the normal view
   and its own texts.
+- **Domains.** legal-judge's questions per rubric item take the new shapes. Chess asks no questions.
 - **Docs.** `docs/MATH.md` writes the view function as
   $V(S, p, \tau) \to (\text{decisionState}, \text{decisionImages})$, and the README, `AGENTS.md` and the terms above
   follow.
 
-One question is still open: the answers. switch's answers also differ from the API's: its yes-or-no answer is `bool`
-with `probability`, where the API's is `noul` with `noul`, and its score answer has no `probabilities` or `legend`.
-Taking the API's answers too would keep one form from the request to the trace. It also changes the answers in the
-trace, legal-judge's scoring and the viewer.
+What stays: switch keeps pi-ai as a dependency, and calls it only from `src/models`. The core has its own copies of
+these types, so that it imports nothing from pi-ai.
 
 ## Out of scope
 
