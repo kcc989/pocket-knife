@@ -34,6 +34,9 @@
 - A domain brings what it needs through switch's general parts: its state, its choice function, its transition
   function, its view, its questions, its own hooks, and its part of the page with its own styles.
 - A concept goes into switch only when it means the same thing for any domain.
+- A domain must give an initial state, a choice function and a transition function. The view, the questions, the
+  answer stages and the outcome are optional. Behind these functions, a domain may use any library, program or data
+  of its own, and switch never sees it.
 
 ## Boundaries
 

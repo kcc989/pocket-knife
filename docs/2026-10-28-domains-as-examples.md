@@ -9,10 +9,11 @@ date: 2026-10-28
 ## TL;DR
 
 A run of switch becomes one state machine: from an initial state S₀, the choice function gives the choices in the
-latest state, the model picks one, and the transition function gives the next state. switch knows nothing about any
-domain, so the trace holds only the states, the choices, the picks and the answers, and the chess styles leave
-switch's page. A replay reads the saved states and runs no transition again. This is the fourth and last PR of this
-plan; old traces need the `jq` command that it adds, and `run --steps-from` becomes `run --state-from`.
+latest state, the model picks one, and the transition function gives the next state. These three are the whole
+interface that a domain must give, and behind them a domain may use any machinery of its own, such as chess.js and
+Stockfish in chess. switch knows nothing about any domain, so the trace holds only the states, the choices, the picks
+and the answers, and a replay reads the saved states and runs no transition again. This is the fourth and last PR of
+this plan; old traces need the `jq` command that it adds, and `run --steps-from` becomes `run --state-from`.
 
 ## Done
 
@@ -89,6 +90,31 @@ seed and engine, stay inside the functions: for each case folder, the domain's `
 data in them. The chess board is never stored. The functions work it out from the start position and the moves in the
 state.
 
+## Interface
+
+switch fixes one interface. Every domain must give three functions:
+
+- the initial state, `initial()`;
+- the choice function, `choices(state)`;
+- the transition function, `transition(state, choice)`.
+
+A domain may also give these, and switch has a default for each one:
+
+- The view, `view(state, purpose, tokens)`. Without it, the model reads the state as it is, with no images, and
+  switch does not cut it to fit the window.
+- The questions, `questions()`, and the answer stages, `answer(context)`. Without questions, the run ends at the last
+  state and asks nothing. Without answer stages, switch asks the questions once over the view.
+- The outcome, `outcome(state, result)`. Without it, `result.json` has no outcome.
+
+Behind the interface, a domain is free. It may use any library, program, data format or model of its problem, and
+switch never sees them. Chess uses chess.js to work out the board from the moves and to list the legal moves, and
+Stockfish for the opponent's reply. legal-judge uses its own ingest of PDF, Word, spreadsheet and email files, its
+search terms and its page images. Each one builds its functions on its own machinery.
+
+The interface is what connects the parts. It gives every domain the same structure, so switch runs any domain with
+the same loop, trace, replay and viewer. It is also the one connection between a domain and the decision model: the
+model reads the view of a state and picks one of the choices, and switch gives that pick to the transition.
+
 ## Types
 
 ```ts
@@ -106,19 +132,20 @@ interface Choice {
   readonly data?: JsonObject;
 }
 
-/** One case as a state machine. The case's fixed data is inside the functions. */
+/** One case as a state machine: the interface. The case's fixed data is inside the functions. */
 interface StateMachine<S extends JsonObject, C extends Choice = Choice> {
   initial(): Promise<S>;
   choices(state: S): readonly C[];
   transition(state: S, choice: C): Promise<S>;
-  /** What the model reads in a state, in at most `tokens` estimated tokens. */
-  view(state: S, purpose: "choose" | "answer", tokens: number): Promise<View>;
-  questions(): readonly Question[];
+  /** What the model reads in a state, in at most `tokens` estimated tokens; the state as it is by default. */
+  view?(state: S, purpose: "choose" | "answer", tokens: number): Promise<View>;
+  /** The questions at the end; none by default. */
+  questions?(): readonly Question[];
   /** Answers the questions in stages of its own; without it, the questions are asked once over the view. */
   answer?(context: AnswerContext<S>): Promise<Readonly<Record<string, Answer>>>;
 }
 
-/** A domain: what every case shares, and how to make the state machine of one case folder. */
+/** A domain, as a harness runs it on case folders: the texts and limits it shares, and the state machine of a folder. */
 interface Domain<S extends JsonObject, C extends Choice = Choice> {
   /** The name and the version go into the trace and `run.json`. */
   readonly name: string;
@@ -136,6 +163,9 @@ interface Domain<S extends JsonObject, C extends Choice = Choice> {
 }
 ```
 
+- `StateMachine` is the interface of the section above. `Domain` adds what a harness needs to run cases from folders
+  and record them: the name, the version, the two texts of the pick question, the definition, the limits, `caseId`
+  and `load`.
 - Today's `Domain` and `Setup` become one type, `Domain`. The four texts that every case shares had a type of their
   own, and only the setup used it.
 - `runnerOf(domain)` gives the domain without its state type, so that a harness can keep domains of different state
@@ -346,8 +376,9 @@ interface LegalState {
 
 ## Docs
 
-- The README's "How it works" describes the state machine with the terms above, and "Write a harness" shows a small
-  domain with its state, `initial`, `choices` and `transition`.
+- The README's "How it works" describes the state machine with the terms above. It says that the three functions are
+  the whole interface that a domain must give, and that a domain builds them on any machinery of its own. "Write a
+  harness" shows a small domain with its state, `initial`, `choices` and `transition`.
 - The example READMEs describe each example's state, initial state, choice function and transition function.
 - `AGENTS.md` gets the terms. It already has the rule. Its boundaries say that `load`, `initial()`, the transition
   and the view's image reads are the only parts of a run that read files or start programs, and that the choice
@@ -360,6 +391,8 @@ interface LegalState {
 
 ## Tests
 
+- A domain with only `initial`, `choices` and `transition` runs: the model reads its state as it is, and the run
+  asks no questions.
 - The core, with a test domain whose state is a small object: `initial` runs once, and `choices` and `transition`
   run once per step. The run saves each state, and ends at stop, with no choices, at the step limit, and when the
   pick fails.
