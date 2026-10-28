@@ -1,22 +1,32 @@
 ---
-title: Domains as examples outside switch
+title: Domains as examples, and a run as a state machine
 author: Onur Solmaz
 date: 2026-10-28
 ---
 
-# Domains as examples outside switch
+# Domains as examples, and a run as a state machine
 
 ## TL;DR
 
-switch's two domains, legal-judge and chess, should show how a project outside switch builds a harness on it. Today
-switch holds them, their data, the legal-judge scoring and the chess viewer, and the core still uses legal-judge words
-such as workspace, judge and evidence, plus two words, option and action, for one idea. Three PRs fix this: the first
-renames the core's words to world, history, choice, menu and answer and removes two legal-judge fields, the second splits
-the viewer so that chess gives its own part of the page, and the third moves each domain into `examples/<name>/` as a
-package that imports `@osolmaz/switch` the way an outside project would. The first PR also takes the words of the
-model's API where they fit: `state` means only the JSON that the model reads, `type` replaces `kind` on questions and
-answers, and a pick keeps its `confidence`. Old traces, `result.json` and `run.json` files need some fields renamed
-with the `jq` commands in this doc, and the commands move to each example's entry point.
+A run of switch becomes one state machine. Each case has an initial state S₀. The choice function takes the latest
+state and gives the choices, the model picks one, and the transition function takes the state and the picked choice
+and gives the next state. The world, the history, the step records, the observations and the menu go from the code and
+the docs, the trace saves every state, and a replay reads the states and runs no transition again. This is the fourth
+PR of this plan. The first three are merged: #26 renamed the core's words, #27 split the viewer, and #28 moved
+legal-judge and chess into `examples/` as packages that import `@osolmaz/switch` as an outside project would. Old traces
+need the `jq` command that the fourth PR adds, and `run --steps-from` becomes `run --state-from`.
+
+## Status
+
+| PR                                               | Section                                     | State   |
+| ------------------------------------------------ | ------------------------------------------- | ------- |
+| [#26](https://github.com/osolmaz/switch/pull/26) | [Names in the core](#names-in-the-core)     | merged  |
+| [#27](https://github.com/osolmaz/switch/pull/27) | [Viewer split](#viewer-split)               | merged  |
+| [#28](https://github.com/osolmaz/switch/pull/28) | [Domains as packages](#domains-as-packages) | merged  |
+| the fourth PR                                    | [One state](#one-state)                     | planned |
+
+The sections of the first three PRs describe the code on the day that each one merged. The fourth PR replaces their
+world, history, step, observation and menu with the terms in [One state](#one-state).
 
 ## Background
 
@@ -97,7 +107,7 @@ the type checker cannot catch a change on one side.
 
 ## Plan
 
-Three PRs, in this order. Each one passes `pnpm check` and leaves switch working.
+Four PRs, in this order. Each one passes `pnpm check` and leaves switch working.
 
 1. **Names in the core.** Rename the legal-judge words, call the log the history, use one word, choice, for a step
    that the model can take, call the domain's function that lists the choices `menu`, pass the world and the history
@@ -108,6 +118,8 @@ Three PRs, in this order. Each one passes `pnpm check` and leaves switch working
    part of the page.
 3. **Domains as packages.** Each domain becomes a package in `examples/<name>/` with its code, data, tests and entry
    point, and switch becomes a package with `exports`.
+4. **One state.** A run becomes a state machine with one state, an initial state, a choice function and a transition
+   function. The world, the history, the observations and the menu go, and the trace saves every state.
 
 The viewer split comes before the packages. After it, switch's viewer and its tests need no domain, so the third PR
 moves folders and wires entry points, and changes no viewer code.
@@ -115,6 +127,8 @@ moves folders and wires entry points, and changes no viewer code.
 ## Names in the core
 
 ### Terms
+
+The fourth PR replaces this table with the [terms of one state](#terms-after-the-fourth-pr).
 
 The menu function is the center of switch: it is how a domain presents its world and its history to the model as a
 short list of choices. After the first PR, switch uses these words, and only these, in its code and its docs. The
@@ -646,6 +660,318 @@ each example may import only its own folder, and switch's rules lose the domain 
 - `docs/2026-10-25-switch-plan.md` links this doc.
 - Dated docs stay as they are, because they describe the repository on their date.
 
+## One state
+
+### Problem
+
+After the first three PRs, a run has two parts: a world, which stays fixed, and a history of steps, which grows. The
+menu function takes both, and a choice's own `run` code finds its observation. That is two concepts for one idea, the
+place where a case is now, and it does not match the usual math of a state machine. That math has one state, an
+initial state, a function that gives the choices in a state, and a function that gives the next state. The fourth PR
+makes the code and the docs follow that math.
+
+### Formulation
+
+A case is a state machine. A run goes:
+
+```text
+S0 = initial()
+for t = 1, 2, …
+  C  = choices(St-1)                       the choice function
+  ct = the model's pick from C and stop    the model reads view(St-1)
+  if ct is stop: end
+  St = transition(St-1, ct)                the transition function
+then the model answers the questions over the last state
+```
+
+- The **state** Sₜ is everything that the functions need to know about where the case is after t steps. The domain
+  gives its type. It is JSON, so that the trace can save it.
+- The **initial state** S₀ is the state before the first pick. `initial()` makes it. In chess it holds the
+  opponent's first move when the opponent moves first, and in legal-judge the parts of the answer read before the
+  first pick.
+- The **choice function** `choices(state)` takes the latest state and gives the choices in it. It does no work.
+- The **model's pick** is the choice that the model takes from the choices and stop, with a probability for each one.
+- The **transition function** `transition(state, choice)` takes the latest state and the picked choice and gives the
+  next state. It does the work of the choice, such as reading a part of a file or getting the engine's reply.
+- A **step** is one pass of the loop: the choices, the pick and the transition. `Limits.steps` counts them.
+
+The data of a case that never changes has no name of its own. A legal case's files, or a chess game's start position,
+seed and engine, stay inside the functions: for each case folder, the domain's setup makes the functions with that
+data in them. The chess board is never stored. The functions work it out from the start position and the moves in the
+state.
+
+### Types
+
+```ts
+/** One thing that the model can do in a state. Stop is a choice too, which switch adds. */
+interface Choice {
+  /** A label such as "read" or "move", for the trace and the viewer. */
+  readonly kind: string;
+  /** Unique in a run, such as "move:0:e2e4". */
+  readonly key: string;
+  /** What the model reads. */
+  readonly text: string;
+  /** Lower keeps the choice when the choices must be cut; 0 by default. */
+  readonly priority: number;
+  /** Facts about the choice for tools that read the trace; the model never sees them. */
+  readonly data?: JsonObject;
+}
+
+/** One case as a state machine. The case's fixed data is inside the functions. */
+interface StateMachine<S extends JsonObject, C extends Choice = Choice> {
+  initial(): Promise<S>;
+  choices(state: S): readonly C[];
+  transition(state: S, choice: C): Promise<S>;
+  /** What the model reads in a state, in at most `tokens` estimated tokens. */
+  view(state: S, purpose: "choose" | "answer", tokens: number): Promise<View>;
+  questions(): readonly Question[];
+  answer?(context: AnswerContext<S>): Promise<Readonly<Record<string, Answer>>>;
+}
+
+/** What every case of a domain shares. */
+interface Domain {
+  readonly name: string;
+  readonly version: string;
+  /** The text of the stop choice, which ends the steps. */
+  readonly stop: string;
+  /** How the model picks from the choices. */
+  readonly instructions: string;
+}
+
+interface Setup<S extends JsonObject, C extends Choice = Choice> {
+  readonly domain: Domain;
+  readonly definition: Definition;
+  readonly limits: Limits;
+  caseId(folder: string): Promise<string>;
+  /** The state machine of a case folder. */
+  load(folder: string): Promise<StateMachine<S, C>>;
+  /** How the case ended in the domain's own terms, from its last state. */
+  outcome?(state: S, result: RunResult<S>): JsonObject;
+}
+```
+
+The transition gets back the domain's own choice type `C`, so it can read what the choice function put in the
+choice, such as a move. The view becomes async, because legal-judge's view reads the images that the state names.
+
+The helper `choiceKind` stays for a domain with several kinds of choice. A kind gives its part of the choice function
+and its part of the transition, with a typed argument:
+
+```ts
+// legal-judge: each kind is made for one case, so it holds that case's files
+const search = (legalCase: LegalCase, terms: readonly Term[]) =>
+  choiceKind<LegalState, Term>({
+    name: "search",
+    choices: (state) =>
+      terms
+        .filter((term) => !found(state, `search:${keyOf(term)}`))
+        .map((term) => ({ key: keyOf(term), text: choiceText(term), arg: term, priority: 1 })),
+    transition: (state, term) => ({
+      evidence: [
+        ...state.evidence,
+        {
+          key: `search:${keyOf(term)}`,
+          source: `search for “${term.term}”`,
+          text: searchFiles(legalCase.files, term.term),
+        },
+      ],
+    }),
+  });
+
+// joinKinds gives one choice function and one transition function, which passes each choice to its kind
+const { choices, transition } = joinKinds(read(legalCase), look(legalCase, folder), search(legalCase, terms) /* … */);
+```
+
+`joinMenus` becomes `joinKinds`. A domain with one kind, such as chess, can write the two functions without the
+helper.
+
+### What switch does to the choices
+
+Before the model sees the choices, switch:
+
+1. Refuses two choices with the same key or the same text, as today.
+2. Refuses a choice whose key the model already picked in this run. Today switch removes such a choice in silence.
+   After this PR the state says what is done, so the choice function must leave it out, and the check only catches a
+   bug in a domain.
+3. Keeps at most `Limits.choices - 1` choices, the ones with the lowest priority value, in the domain's order, as
+   today.
+4. Adds stop.
+
+`buildMenu` becomes `offerChoices`, and `MenuError` becomes `ChoiceError`.
+
+### The trace
+
+The trace saves every state. Its entries:
+
+| Entry     | What it holds                                                                   | Before                |
+| --------- | ------------------------------------------------------------------------------- | --------------------- |
+| `case`    | the case, the domain, the model and the limits                                  | the same              |
+| `state`   | `step` and the whole `state`; step 0 holds S₀, and one follows each transition  | `observation` entries |
+| `choices` | `step` and the choices that the model saw, stop included: key, kind, text, data | `menu`                |
+| `pick`    | `step`, the picked key, the probabilities by key, the confidence and the usage  | `choice`              |
+| `answers` | the answers to the questions                                                    | the same              |
+| `asked`   | the answers of one answer stage                                                 | the same              |
+| `note`    | a message                                                                       | the same              |
+
+A whole state in each entry keeps the trace simple. For the two examples, it stays below about 1.5 MB for one case:
+a chess game has at most 201 states of a few KB, and a legal-judge case at most 9 states of at most about 120 KB of
+evidence.
+
+legal-judge's look choice and its initial state add images. A state names each image by its file in the case folder,
+with the label, the path and the media type that the case's `renders` hold today, and the view reads the files. So a
+trace holds no image data, as today, and no image is copied.
+
+### Replay
+
+The trace has every state, so a replay runs no transition and calls no model:
+
+- `replay` reads S₀ to Sₜ from the trace. At each step it makes the choices from the recorded state, checks that the
+  recorded pick is on them, and repeats it. Then it repeats the recorded answers. It checks that the domain's code
+  still offers the recorded choices, and it writes a new trace.
+- `replay --fork n` takes Sₙ from the trace. From step n + 1 the model picks and the transitions run.
+- `run --steps-from <run>` becomes `run --state-from <run>`: each case takes its last state from that run, and the
+  model answers the questions again. `run.json` records `stateFrom` in place of `stepsFrom`, and `compare` prints
+  "state of <run>".
+
+`startOf`, `observe`, `assertSame` and the rule that runs an image step again go.
+
+### Names that change
+
+| Before                                                    | After                                                          |
+| --------------------------------------------------------- | -------------------------------------------------------------- |
+| the world, and the type parameter `W`                     | the case's fixed data, inside the functions; `S` for the state |
+| the history, `Step` and `Observation`                     | the state                                                      |
+| `Domain.start(world)`                                     | `initial()`                                                    |
+| `Domain.menu(world, history)` and `Menu<W>`               | `choices(state)`                                               |
+| a choice's `run()`                                        | `transition(state, choice)`                                    |
+| `Domain.view(world, history, purpose, tokens)`            | `view(state, purpose, tokens)`, async                          |
+| `Domain.questions(world)`                                 | `questions()`                                                  |
+| `AnswerContext.world` and `AnswerContext.history`         | `AnswerContext.state`                                          |
+| `Setup.load` gives the world                              | `Setup.load` gives the case's `StateMachine`                   |
+| `Setup.outcome(world, result)`                            | `Setup.outcome(state, result)`                                 |
+| `RunResult.history`                                       | `RunResult.state`, the last state                              |
+| `View.state`, `DecisionRequest.state`, `AskOptions.state` | `View.json`, `DecisionRequest.json`, `AskOptions.json`         |
+| `buildMenu`, `MenuError`, `joinMenus`                     | `offerChoices`, `ChoiceError`, `joinKinds`                     |
+| the `Ending` values `"empty menu"` and `"no choice"`      | `"no choices"` and `"pick failed"`                             |
+| the trace entries `observation`, `menu` and `choice`      | `state`, `choices` and `pick`                                  |
+| `run --steps-from`, and `stepsFrom` in `run.json`         | `run --state-from`, and `stateFrom`                            |
+
+After this PR, "state" has one meaning in switch: Sₜ. The model's API still calls the JSON that the model reads
+`state`. Only the adapter in `src/models/pi-ai.ts` uses that word, where it sends the request's `json` as the API's
+`state`. `requests.jsonl` records `json`.
+
+### Terms after the fourth PR
+
+switch uses these words, and only these, in its code and its docs. The README's "How it works" introduces them in
+this order.
+
+| Term                | Meaning                                                                                               |
+| ------------------- | ----------------------------------------------------------------------------------------------------- |
+| state               | Where a case is after some steps: everything that the functions need, as JSON. Sₜ after t steps.      |
+| initial state       | S₀, the state before the first pick, which `initial()` makes.                                         |
+| choice function     | `choices(state)`: takes the latest state and gives the choices in it.                                 |
+| choice              | One thing that the model can do in a state, with the text that the model reads. Stop is a choice too. |
+| kind                | The label of a choice, such as `read` or `move`.                                                      |
+| pick                | The choice that the model takes, with a probability for each choice.                                  |
+| transition function | `transition(state, choice)`: takes the latest state and the picked choice and gives the next state.   |
+| step                | One pass of the loop: the choices, the pick and the transition.                                       |
+| view                | `view(state, purpose, tokens)`: the JSON and the images that the model reads in a state.              |
+| instructions        | The text that tells the model how to pick from the choices, or how to answer a question.              |
+| question            | What the model answers at the end of the steps: a `bool`, a `choice` or a `score` question.           |
+| answer              | The model's answer to a question, with its probabilities.                                             |
+| trace               | The record of a run: every state, the choices and the pick of each step, and the answers.             |
+
+`AGENTS.md` lists these terms. Its rule against old names adds world, history, observation and menu to workspace,
+log, entry, option and action.
+
+### Chess
+
+The chess state:
+
+```ts
+interface ChessState {
+  /** The side that the model plays, or both in self-play. */
+  readonly you: "white" | "black" | "both";
+  /** The opponent's name, for the viewer. */
+  readonly opponent: string;
+  /** Every move so far, of both sides: in long algebraic notation, and in SAN. */
+  readonly moves: readonly string[];
+  readonly san: readonly string[];
+  readonly fen: string;
+  readonly status: Status;
+  readonly check: boolean;
+  /** What the last step did, such as "You played e4. The opponent played e5.". */
+  readonly last: string;
+}
+```
+
+- `you` and `opponent` never change. They are in the state because the viewer draws them. The start position, the
+  seed, the move time and the engine stay inside the functions that `load` makes.
+- `initial()` is today's `opening`. `choices` gives the legal moves of the board that the start position and
+  `moves` make, so chess.js still sees a repeated position. The keys stay `move:<plies>:<lan>`.
+- `transition` is today's `play`: the model's move and, against an opponent, the reply.
+- `view` is today's view, from the state. Its `last_step` is the state's `last`, so the view is the same as today.
+- `outcome` reads the last state, and the stop choice still counts as a resignation.
+- The chess part of the viewer reads the state. `web/data.ts` checks a chess state in place of the step data. The
+  moves of a step are the new entries of `moves`.
+
+### Legal-judge
+
+The legal-judge state:
+
+```ts
+interface LegalState {
+  /** What the run found, in order: the key of each choice, its source, its text, and the image that it looked at. */
+  readonly evidence: readonly { key: string; source: string; text: string; image?: Render }[];
+}
+```
+
+- The case, its search terms and its folder stay inside the functions that `load` makes.
+- `initial()` is today's `openAnswer`, as evidence entries.
+- `choices` joins the six kinds as today. Each kind leaves out the keys that the evidence already holds. `read` and
+  `search` do that today. `look`, `count`, `changes` and `compare` start to do it.
+- `transition` adds the evidence entry of the picked choice.
+- `view` is today's view, from the evidence, and it reads the images that the entries name.
+- `judgeWith` gets the state.
+
+### Viewer
+
+- The viewer reads a story of states: S₀, and for each step the choices with their probabilities, the pick and the
+  state after it.
+- Without a domain part, the page shows what each step changed, in place of the observation text: each top-level field
+  of the state whose value changed, and, for a list that only grew, its new entries. For legal-judge that is the new
+  evidence.
+- A domain part's hooks get the states in place of the observations.
+
+### Docs
+
+- The README's "How it works" describes the state machine with the terms above.
+- The example READMEs describe each example's state, initial state, choice function and transition function.
+- `AGENTS.md` gets the terms, and its boundaries say: the transition, `initial()`, `load` and the view's image reads
+  are the only parts of a run that read files or start programs, and the choice function reads only the state and the
+  case's fixed data.
+- `docs/2026-10-28-the-math-behind-switch.md` becomes an abstract explainer. It has one state Sₜ, S₀, the choice
+  function, the model's pick and the transition function, and then what switch does to the choices, one pick, a run,
+  the replay and the window, with symbols only. It names no model, no example's numbers, no file path and no flag.
+  Its two legal-judge sections, on verdicts and on scores, move to the legal-judge README.
+
+### Tests
+
+- The core, with a test domain whose state is a small object: `initial` runs once, and `choices` and `transition`
+  run once per step. The run saves each state, and ends at stop, with no choices, at the step limit, and when the
+  pick fails.
+- The choices: the run refuses two choices with one key or one text, and a key already picked. It cuts by priority
+  and adds stop.
+- The trace has `state`, `choices` and `pick` entries, and no `observation`, `menu` or `choice` entries.
+- Replay: with a transition that throws, a replay still passes. A recorded pick that is not on the choices fails the
+  replay. A fork from Sₙ runs the transitions after step n. `run --state-from` takes the last state and asks only the
+  questions.
+- Chess: the initial state when the opponent moves first, a move and its reply, the view from a state, the outcome
+  from the last state, and the viewer's board from the states.
+- Legal-judge: the initial state holds today's opening steps as evidence. Each kind leaves out what is done. A
+  transition adds one evidence entry. The view reads the named images, and the judge reads the state.
+- A check before the merge: the requests that a test case of each domain sends to the model are byte for byte the
+  same as on `main`.
+
 ## Migrations and breaking changes
 
 Each change replaces the old contract in place. No old name, command or reader stays.
@@ -666,6 +992,10 @@ Each change replaces the old contract in place. No old name, command or reader s
 | An eval set file                           | packages        | Nothing.                                                                                                                                                                                                                                                                                                                                                                                            |
 | A path into `judges/` or `examples/chess/` | packages        | `examples/legal-judge/judges/` and `examples/chess/cases/`.                                                                                                                                                                                                                                                                                                                                         |
 | A domain written outside this repository   | names, packages | Rename `workspace` to `world`, `log` to `history` and `judge` to `answer`. Turn the list of actions into one `menu(world, history)` function with `choiceKind`, whose spec has `menu` and `run`. Take the world and the history as two arguments in `view`. Use `type` on questions and answers. Move `informs` into `data`, import `@osolmaz/switch`, and write an entry point with `commandLine`. |
+| A trace from before the fourth PR          | state           | Turn it into states with the example's `jq` command, which the fourth PR adds to each example's README after a try on a copy of a run. The legal-judge command also reads the case's `case.json`, to name the file of each image from its label. The readers do not accept `observation`, `menu` or `choice` entries.                                                                               |
+| A `run.json` from before the fourth PR     | state           | Rename `stepsFrom` to `stateFrom`.                                                                                                                                                                                                                                                                                                                                                                  |
+| `run --steps-from <run> …`                 | state           | `run --state-from <run> …`                                                                                                                                                                                                                                                                                                                                                                          |
+| A domain written after the third PR        | state           | Give a JSON state type and a `load` that makes a `StateMachine` for each case folder: `initial`, `choices`, `transition`, an async `view` of the state, and `questions`. Move the code of each choice's `run` into the transition, and the world into the functions. Take `json` in place of `state` from a `View`.                                                                                 |
 
 The three `jq` commands rename the fields of one case's trace, one case's `result.json`, and a run's `run.json`. They
 write new files, and you replace the old files after a check. The trace command drops `informs`, which nothing reads.
@@ -690,6 +1020,8 @@ jq '.limits |= (.choices = .options | del(.options)) | .stepsFrom = .evidenceFro
 - Publishing switch to npm. The package stays private, and a Git install gets the build.
 - A scorer for every domain. switch gets one when a second domain needs labels.
 - A repository for each example.
-- Changes to the trace other than the renames above, `informs`, `source` and `confidence`.
+- In the first PR, changes to the trace other than the renames above, `informs`, `source` and `confidence`.
 - Renaming switch's `choices`, `levels`, `yes`, `no`, `Decider` and `decide` to the API's words. The section on the
   model's words gives the reasons.
+- Saving only what changed between two states, in place of each whole state. A later PR can do it if traces grow too
+  large.
