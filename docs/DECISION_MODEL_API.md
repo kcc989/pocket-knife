@@ -4,10 +4,10 @@
 
 A decision model reads some content once and answers typed questions about it with probabilities. It writes no text.
 TypeSafe defined the API for its Jev model, `POST /v1/systemone`, and llama.cpp and Cloudflare Workers AI serve open
-decision models through the same request shape: a `state`, a set of named `questions`, and optional images. Each
-answer is a probability over the answers that the question allows, so the answer is always one of them. The
-providers differ mainly in how they take images and in their limits, such as at most 52 options per question for
-OpenJev and at most 4 images per request for Clef.
+decision models with the same data model: a request holds a `state` and named `questions`, and a response holds one
+typed answer per question, with the probability of every answer that the question allows. The providers differ in a
+few fields and limits. Only TypeSafe has `box` questions and takes images as `assets`; llama.cpp and Clef take an
+`images` list instead and need `instructions` on every question.
 
 ## What a decision model is
 
@@ -19,12 +19,194 @@ reasoning."
 
 This makes them fast and cheap. Output tokens cost nothing: llama.cpp reports none, and TypeSafe and Cloudflare do not
 charge for them. On llama.cpp, the small models answer a question in a few milliseconds. It also makes them safe to
-wire into a program: the answer of a choice question is
-always one of the options that the caller gave.
+wire into a program: the answer of a choice question is always one of the options that the caller gave.
 
-## The request
+## Data model
 
-A request is one JSON object. The same body works on TypeSafe's API and on a llama.cpp server with one model:
+The types below are the whole API, written in TypeScript. They join the schemas of the three providers into one, and
+a comment marks each field that only some providers have.
+[Differences between providers](#differences-between-providers) lists the rest.
+
+Most fields that the model reads take the same three forms, which this doc calls `Content`:
+
+```ts
+/** Something for the model to read: a string, or a JSON object or array, which the model reads as JSON text. */
+type Content = string | { [key: string]: unknown } | unknown[];
+```
+
+### Request
+
+A request is one JSON object:
+
+```ts
+interface Request {
+  /** The model, by name or alias. TypeSafe and Clef need it. llama.cpp uses it when the server has several models. */
+  model?: string;
+  /** What every question of the request is about. */
+  state: Content;
+  /** The questions, by an id that the caller picks. The answers come back under the same ids. At least one. */
+  questions: { [id: string]: Question };
+  /** Images, on llama.cpp and Clef. */
+  images?: Image[];
+  /** Images, on TypeSafe. */
+  assets?: { [placeholder: string]: Asset };
+}
+```
+
+The `state` holds everything that the questions need, such as a customer's message with their transactions and the
+refund policy. All the questions of a request share it.
+
+### Questions
+
+There are four types of question. Every provider has the first three, and only TypeSafe has `box`:
+
+```ts
+type Question = NoulQuestion | ChoiceQuestion | ScoreQuestion | BoxQuestion;
+
+/** Is this true? */
+interface NoulQuestion {
+  type: "noul";
+  /** The question or statement. TypeSafe: optional. llama.cpp and Clef: required. The same holds for every type. */
+  instructions?: Content | null;
+  /** What counts as true and what counts as false. */
+  criteria?: { true?: Content | null; false?: Content | null } | null;
+}
+
+/** Which of these options fits? */
+interface ChoiceQuestion {
+  type: "choice";
+  instructions?: Content | null;
+  /** Each option's name and its description. With a null description, the model reads the name alone. */
+  criteria: { [option: string]: Content | null };
+}
+
+/** Where on this scale is it? */
+interface ScoreQuestion {
+  type: "score";
+  instructions?: Content | null;
+  /** The levels' descriptions, lowest first. Level i is the one at index i. */
+  criteria: Content[];
+}
+
+/** Where in the image is it? TypeSafe only. */
+interface BoxQuestion {
+  type: "box";
+  /** What to find in the image. */
+  instructions?: Content | null;
+}
+```
+
+Instructions and descriptions can be JSON as well as text. Clef's schema gives the reason: an object can hold the
+question in one field and the data it refers to in others.
+
+### Images
+
+The providers take images in three ways. llama.cpp and Clef take an `images` list, which the OpenJev multimodal API
+added to TypeSafe's API, and put the images before the state in the prompt:
+
+```ts
+/** llama.cpp: a data URL, such as "data:image/png;base64,…". Clef: a data URL, or the bytes with their type. */
+type Image = string | { content_type: string; base64: string };
+```
+
+llama.cpp also takes a `state` that is a list of chat messages, or an object with a `messages` list. An `image_url`
+part in a message's content is read as an image, as in chat completions, and is taken out of the text.
+
+TypeSafe takes `assets` instead. Each asset has a placeholder, such as an id, and the image goes wherever the
+placeholder appears in a string of the state, the instructions or the criteria:
+
+```ts
+/** TypeSafe: an image in base64 with its format, or, in a multipart request, the name of the part that holds it. */
+interface Asset {
+  type: "image";
+  /** Needed with data_base64. The server reads the real format from the bytes. */
+  format?: "png" | "jpg" | "jpeg";
+  data_base64?: string;
+  /** With part, data_base64 is ignored. */
+  part?: string;
+}
+```
+
+Requests with assets or box questions need the header `TypeSafe-Danger-Zone-Images: true`. TypeSafe's docs also say
+that Jev itself reads text only, so images need one of its image models.
+
+### Response
+
+A response has one answer for each question, of the question's type:
+
+```ts
+interface Response {
+  /** The model that answered. It can differ from the alias in the request. */
+  model: string;
+  /** One answer per question, under the question's id. */
+  answers: { [id: string]: Answer };
+  usage: { input_tokens: number; output_tokens: number };
+}
+
+type Answer = NoulAnswer | ChoiceAnswer | ScoreAnswer | BoxAnswer;
+
+interface NoulAnswer {
+  type: "noul";
+  /** The probability of true, from 0 to 1. */
+  noul: number;
+}
+
+interface ChoiceAnswer {
+  type: "choice";
+  /** The option with the highest probability. */
+  choice: string;
+  /** Each option's probability. They sum to 1. */
+  probabilities: { [option: string]: number };
+  /** From 0 to 1. See Confidence. */
+  confidence: number;
+}
+
+interface ScoreAnswer {
+  type: "score";
+  /** The expected level. It can fall between two levels. */
+  score: number;
+  /** Each level's index, as a string, and its description. */
+  legend: { [level: string]: Content };
+  /** Each level's probability, under the same keys as legend. They sum to 1. */
+  probabilities: { [level: string]: number };
+  confidence: number;
+}
+
+/** TypeSafe only. */
+interface BoxAnswer {
+  type: "box";
+  /** The box's edges as fractions of the image: top and bottom from its top edge, left and right from its left edge. */
+  box: { top: number; bottom: number; left: number; right: number };
+  /** Null when the model gives no confidence. */
+  confidence: number | null;
+}
+```
+
+Each question is answered on its own: one answer does not depend on another. Clef is the exception, as it reads all
+the questions in one prompt and decides them together. Some models read the state only once for all the questions,
+which makes extra questions cheap.
+
+## Differences between providers
+
+These are from the providers' schemas and docs in October 2026:
+
+| Field or limit         | TypeSafe                               | llama.cpp                                                          | Clef on Workers AI                                      |
+| ---------------------- | -------------------------------------- | ------------------------------------------------------------------ | ------------------------------------------------------- |
+| `model`                | Required                               | Optional; picks a model on a server with several                   | Required: `clef` or `clef-flash`                        |
+| `instructions`         | Optional                               | Required                                                           | Required, and not empty                                 |
+| Question types         | `noul`, `choice`, `score`, `box`       | `noul`, `choice`, `score`                                          | `noul`, `choice`, `score`                               |
+| Questions in a request | 1 or more                              | 1 or more                                                          | 1 to 64                                                 |
+| Question ids           | Any string                             | Any string                                                         | Letters, digits, `_`, `.` and `-`, up to 100 characters |
+| Options of a `choice`  | 1 to 255                               | 1 to the model's limit: 52 for OpenJev, 255 for Kev, Laya and Clef | 2 to 255                                                |
+| Levels of a `score`    | 1 to 10                                | 2 to 10                                                            | 2 to 10                                                 |
+| Images                 | `assets`: PNG or JPEG, with the header | `images`: up to 8 data URLs; or chat messages                      | `images`: up to 4, PNG, JPEG or WebP, 4 MiB each        |
+| Context                | Long context needs a header            | The server's settings                                              | 65,536 tokens; long text in the state is cut            |
+
+On llama.cpp, Laya and Clef must also fit the whole prompt into one batch of the server's `--ubatch-size`.
+
+## An example
+
+This request works on TypeSafe and on a llama.cpp server with one model:
 
 ```json
 {
@@ -46,41 +228,7 @@ A request is one JSON object. The same body works on TypeSafe's API and on a lla
 }
 ```
 
-It has these fields:
-
-- **`state`** is the content that every question in the request is about: a string, a JSON object or an array. A
-  value that is not a string reaches the model as JSON text. The state can hold anything the decision needs, such as
-  a customer's message with their transactions and the refund policy.
-- **`questions`** maps a question id to a question. Every question has a `type` and `instructions`, the question
-  itself. Most types also have `criteria`, the answers that the question allows.
-- **`model`** names the model. TypeSafe needs it. A llama.cpp server with one model ignores it, and one that serves
-  several models picks by it.
-- **Images** are optional, and each provider takes them in its own way. See [Images](#images).
-
-## Question types
-
-Three types work on every provider:
-
-| Type     | What it asks                 | `criteria`                                           |
-| -------- | ---------------------------- | ---------------------------------------------------- |
-| `choice` | Which of these options fits? | An object from each option's name to its description |
-| `score`  | Where on this scale is it?   | An array of level descriptions, lowest level first   |
-| `noul`   | Is this true?                | Optional: descriptions of `true` and `false`         |
-
-A choice option's description can be `null`, and then the model reads the option's name alone. The llama.cpp blog
-shows why descriptions help: with bare labels, a small model sent "charged twice" to shipping, and with a description
-of each team, it picked billing at 0.99.
-
-TypeSafe also has a fourth type, `box`, which finds a region in an image and returns its four edges as fractions of
-the image's size. It needs an image model and an opt-in header, and llama.cpp does not serve it.
-
-The questions of one request share the state, and each one is answered on its own: one answer does not depend on
-another. Clef is the exception, as it reads all the questions in one prompt and decides them together. Some models
-read the state only once for all the questions of a request, which makes extra questions cheap.
-
-## The answer
-
-The response maps each question id to its answer, and adds the model's name and the token usage:
+This is the response from OpenJev on llama.cpp:
 
 ```json
 {
@@ -105,28 +253,26 @@ The response maps each question id to its answer, and adds the model's name and 
 }
 ```
 
-Each type answers in its own form:
+The choice options here have no descriptions. Descriptions help: in the llama.cpp blog, a small model sent "charged
+twice" to shipping with bare option names, and picked billing at 0.99 once each team had a description.
 
-- A **`choice`** answer gives the probability of every option, which sum to 1, and names the likeliest one as
-  `choice`.
-- A **`noul`** answer is one number, the probability that the statement is true. Near 1 means yes, near 0 means no,
-  and near 0.5 means that the model is unsure.
-- A **`score`** answer gives the probability of every level, by the level's index from 0, and a `legend` from each
-  index to its description. Its `score` is the expected level, so it can fall between two levels.
+## Reading the answers
 
-For a score question with levels $0, \dots, n-1$ and probabilities $p_i$, the score is the probability-weighted mean
-of the levels:
+A `noul` answer near 1 means yes, near 0 means no, and near 0.5 means that the model is unsure.
+
+A `score` answer's `score` is the probability-weighted mean of the levels. For levels $0, \dots, n-1$ with
+probabilities $p_i$:
 
 $$\text{score} = \sum_{i=0}^{n-1} i \, p_i$$
 
-In the example above, $0 \cdot 0.0023 + 1 \cdot 0.116 + 2 \cdot 0.6753 + 3 \cdot 0.2064 \approx 2.09$: mostly "today",
-leaning toward "right now".
+In the example, $0 \cdot 0.0023 + 1 \cdot 0.116 + 2 \cdot 0.6753 + 3 \cdot 0.2064 \approx 2.09$: mostly "today",
+leaning toward "right now". The `probabilities` show the whole spread, which the mean hides.
 
 ## Confidence
 
-Choice and score answers also carry a `confidence` from 0 to 1. It says how far the probabilities are from an even
-spread, so a caller can act on confident answers and send the rest to a person. llama.cpp computes it with the
-formulas that TypeSafe published.
+Choice and score answers carry a `confidence` from 0 to 1. It says how far the probabilities are from an even spread,
+so a caller can act on confident answers and send the rest to a person. llama.cpp computes it with the formulas that
+TypeSafe published.
 
 For a choice among $n$ options, it measures how far the likeliest option's probability $p_{\max}$ rises above the even
 share $1/n$, as a fraction of the most it could rise:
@@ -162,9 +308,8 @@ probabilities:
 $$p_i = \frac{e^{s_i / T}}{\sum_j e^{s_j / T}}$$
 
 The temperature is stored in the model file. The model's makers fit it, and it can depend on the question's type and
-its number of options. A model may also prefer
-the first label it sees. One of the open models, lev, therefore reads a choice's options in two orders and averages
-the two results.
+its number of options. A model may also prefer the first label it sees. One of the open models, lev, therefore reads a
+choice's options in two orders and averages the two results.
 
 TypeSafe trains Jev "for calibrated decisions", and its docs add that "calibration is measured across groups of
 predictions; it does not guarantee that an individual answer is correct". llama.cpp says the same of the open models:
@@ -172,46 +317,26 @@ the probabilities "are not guaranteed to be calibrated for your data". The same 
 probabilities from different models: in the llama.cpp blog, one vague ticket scored 0.25 on one model and 0.80 on
 another. A cutoff such as "act above 0.9" has to be tested on the caller's own examples, for each model.
 
-## Images
-
-Image models read images together with the state. The providers take them in three ways:
-
-- **An `images` list.** llama.cpp and Clef take an array of data URLs, such as `data:image/png;base64,…`. The images
-  go before the state in the prompt. This list is an extension that the OpenJev multimodal API defined.
-- **Chat messages.** llama.cpp also takes a `state` that is a list of chat messages, or an object with a `messages`
-  list. An `image_url` part in a message is read as an image, as in chat completions, and is taken out of the text.
-- **Assets.** TypeSafe takes an `assets` object that maps a placeholder, such as an id, to an image. The placeholder
-  can then appear anywhere in the state, the instructions or the criteria, and the image goes in its place. Images on
-  TypeSafe need an image model and the header `TypeSafe-Danger-Zone-Images: true`. Its docs say that Jev itself reads
-  text only.
-
-Images count as input tokens. On Clef, an image costs one token per 32 × 32 pixel block plus 3, at most 1,024 tokens.
-
-## Limits
-
-Each provider and model has its own limits. These are from their docs in October 2026:
-
-| Limit                         | TypeSafe API                | llama.cpp                               | Clef on Workers AI       |
-| ----------------------------- | --------------------------- | --------------------------------------- | ------------------------ |
-| Options per `choice` question | 1 to 255                    | Per model: 52 for OpenJev, 255 for Laya | Not stated               |
-| Levels per `score` question   | 1 to 10                     | 2 to 10                                 | Not stated               |
-| Questions per request         | At least 1                  | At least 1                              | 1 to 64                  |
-| Images per request            | Not stated                  | 8                                       | 4, of at most 4 MiB each |
-| Context                       | Long context needs a header | The server's settings, see below        | 65,536 tokens            |
-
-On llama.cpp, Laya and Clef must fit the whole prompt into one batch of the server's `--ubatch-size`. Clef cuts long
-text in the state to fit its window. A request that does not fit fails with an error.
-
 ## Providers
 
-**TypeSafe** serves Jev at `POST https://api.typesafe.ai/v1/systemone`, with the API key as a bearer token.
-`GET /v1/models` lists the model names, and `jev-latest` is the default of TypeSafe's client libraries. Errors are
-`400` for a bad request and `422`
-for a body that does not match the schema. Output tokens are free.
+**TypeSafe** serves Jev at `POST https://api.typesafe.ai/v1/systemone`.
+
+- **Authentication:** the API key goes in the header `Authorization: Bearer <API_KEY>`.
+- **Headers:** `TypeSafe-Danger-Zone-Images: true` turns on assets and box questions, and
+  `TypeSafe-Danger-Zone-Long-Context: true` turns on long context.
+- **Multipart:** a request can also be `multipart/form-data`, with the JSON as the first part, named `request`, and
+  each image as a part of its own. Each image part is named by the `part` of exactly one asset.
+- **Models:** `GET /v1/models` returns `{ "models": [{ "name", "description", "release_date" }] }`. `jev-latest` is
+  the default of TypeSafe's client libraries.
+- **Errors:** `400` with `{ "detail": string | object }` for a bad request, and `422` with
+  `{ "detail": [{ "loc", "msg", "type", "input"?, "ctx"? }] }` for a body that does not match the schema.
+- **Cost:** input tokens are billed, and output tokens are free.
 
 **llama.cpp** serves open decision models at `POST /v1/systemone` on `llama serve`, so a client of TypeSafe's API only
-needs a new base URL. Errors are `400` for a bad request and `501` for a model that is not a decision model, or for
-images that the model cannot read. The models in its blog post are these:
+needs a new base URL. It does not stream. Errors come as `{ "error": { "code", "message", "type" } }`: `400` for a bad
+request, and `501` for a model that is not a decision model, or for images that the model or the server cannot read.
+`GET /v1/models` marks a decision model with the output modality `decisions`. The models in llama.cpp's blog post are
+these:
 
 | Model   | Size | Base             | Languages              | Images | License      | Time per question |
 | ------- | ---- | ---------------- | ---------------------- | ------ | ------------ | ----------------- |
@@ -224,19 +349,20 @@ images that the model cannot read. The models in its blog post are these:
 
 The times are medians per question on one NVIDIA RTX PRO 6000.
 
-**Cloudflare Workers AI** serves Clef as `@cf/cloudflare/clef`, and also `@cf/cloudflare/clef-flash`, at
+**Cloudflare Workers AI** serves Clef as `@cf/cloudflare/clef` and `@cf/cloudflare/clef-flash`, at
 `POST https://api.cloudflare.com/client/v4/accounts/{ACCOUNT_ID}/ai/run/@cf/cloudflare/clef`, or from a Worker with
-`env.AI.run`. The body has the same `state`, `questions` and `images`, with `model` set to `clef` or `clef-flash`, and
-the REST API wraps the answer in Cloudflare's usual `{ success, result }` envelope. Clef costs $0.24 per million
-input tokens, and output tokens are
-free.
+`env.AI.run`. The REST API wraps the response in Cloudflare's usual `{ success, result }` envelope. Clef costs $0.24
+per million input tokens, images included, and output tokens are free. On Clef, an image costs one token per 32 × 32
+pixel block plus 3, at most 1,024 tokens.
 
 ## Sources
 
-- TypeSafe: [System One models](https://docs.typesafe.ai/concepts/system-one) and the
-  [API reference](https://docs.typesafe.ai/api), with its [OpenAPI spec](https://api.typesafe.ai/openapi.json).
+- TypeSafe: [System One models](https://docs.typesafe.ai/concepts/system-one), the
+  [API reference](https://docs.typesafe.ai/api) and its [OpenAPI spec](https://api.typesafe.ai/openapi.json).
 - llama.cpp: the server README, section "POST `/v1/systemone`: TypeSafe-compatible System One API", the server's
   decision code in `tools/server/server-decision.cpp`, and the blog post
   [New in llama.cpp: Decision Models](https://huggingface.co/blog/ggml-org/decision-models-in-llamacpp).
 - OpenJev: the [multimodal API](https://jev-skills.github.io/openjev-multimodal/api).
-- Cloudflare: the [Clef model page](https://developers.cloudflare.com/workers-ai/models/clef/).
+- Cloudflare: the [Clef model page](https://developers.cloudflare.com/workers-ai/models/clef/), with its
+  [input schema](https://developers.cloudflare.com/workers-ai/models/clef/schema-input.json) and
+  [output schema](https://developers.cloudflare.com/workers-ai/models/clef/schema-output.json).
