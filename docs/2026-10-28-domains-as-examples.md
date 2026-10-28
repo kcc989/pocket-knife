@@ -393,7 +393,7 @@ interface LegalState {
   and the view's image reads are the only parts of a run that read files or start programs, and that the choice
   function reads only the state and the case's fixed data.
 - The comments and help texts in `src/` that name an example get general words.
-- `docs/2026-10-28-the-math-behind-switch.md` becomes an abstract explainer. It starts with no domain at all: one
+- `docs/2026-10-28-the-math-behind-switch.md`, now [`docs/MATH.md`](MATH.md), becomes an abstract explainer. It starts with no domain at all: one
   state Sₜ, S₀, the choice function, the model's pick and the transition function, and then what switch does to the
   choices, one pick, a run, the replay and the window, with symbols only. It names no model, no file path and no flag.
   Where an example helps, it uses chess, and it uses no legal-judge example. Its two legal-judge sections, on verdicts

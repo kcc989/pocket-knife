@@ -1,10 +1,3 @@
----
-title: The math behind switch
-author: Onur Solmaz
-date: 2026-10-28
-tags: [design, math]
----
-
 # The math behind switch
 
 ## TL;DR
