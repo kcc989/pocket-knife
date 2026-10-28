@@ -502,6 +502,67 @@ The fourth PR follows the plan above, with these differences and additions:
 - **Word lists.** Each example lists its words in `domain-words.txt`, and the word check reads every example's list
   in place of a list of its own, so a new example is covered once it brings its list.
 
+## Next: the decision request
+
+Status: planned, not built.
+
+The view function gives exactly what the decision model reads, in the form of the decision model API that
+[DECISION_MODEL_API.md](DECISION_MODEL_API.md) describes. switch then adds the questions, and nothing else changes the
+request on its way to the model. Each name that comes from the API takes the prefix `decision`, so that "state" in
+switch still means only Sₜ: the API's `state` becomes `decisionState`.
+
+```ts
+/** One request to the decision model, in the API's form. */
+export interface DecisionRequest {
+  /** The API's `state`: what the model reads, as a string, a JSON object or an array. */
+  readonly decisionState: string | JsonObject | readonly Json[];
+  /** The images that the model reads with it. */
+  readonly decisionImages: readonly Image[];
+  /** The API's `questions`: the questions by id, in the API's form. */
+  readonly decisionQuestions: Readonly<Record<string, DecisionQuestion>>;
+}
+
+/** What the view function gives: the decision request without its questions, which switch adds. */
+export type View = Omit<DecisionRequest, "decisionQuestions">;
+
+// In StateMachine, with the same arguments as now:
+view?(state: S, purpose: "choose" | "answer", tokens: number): Promise<View>;
+```
+
+A request is made like this:
+
+1. **Pick.** switch turns the offered choices and stop into one choice question. It calls
+   `view(Sₜ₋₁, "choose", τ)` and sends the view with that question.
+2. **Answers.** switch splits the domain's questions into batches. For each batch, it calls `view(S, "answer", τ)` and
+   sends the view with the batch.
+3. **Window.** When the model's API says that a request was too long, switch calls the view function again with a
+   smaller τ, as it does now.
+4. **Decider.** The decider turns the request into its provider's body: `decisionState` into `state`,
+   `decisionImages` into an `images` list or `assets`, and `decisionQuestions` into `questions`.
+5. **Record.** `requests.jsonl` keeps each decision request as it was sent, with each image by its label.
+
+What changes:
+
+- **View.** `json` becomes `decisionState`, which may also be a string or an array, and `images` becomes
+  `decisionImages`. `omitted` and the trace's note "the view left out" go: the requests file shows what the model
+  read, and a domain that cuts something writes that into `decisionState` when the model should know.
+- **Images.** `Image` keeps its label, media type and base64 data, because the providers take images in different
+  forms. The decider builds each provider's form.
+- **Questions.** The questions take the API's form: the yes-or-no type is `noul` in place of `bool`, and `criteria`
+  replaces `yes` and `no`, `choices` and `levels`. A question's id becomes its key in `decisionQuestions`, in place of
+  an `id` field.
+- **Answer stages.** `AskOptions.json` and `AskOptions.extra` go. A stage can give its own view function instead,
+  which switch fits to the window like the domain's. legal-judge's check stage builds its view from the normal view
+  and its own texts.
+- **Docs.** `docs/MATH.md` writes the view function as
+  $V(S, p, \tau) \to (\text{decisionState}, \text{decisionImages})$, and the README, `AGENTS.md` and the terms above
+  follow.
+
+One question is still open: the answers. switch's answers also differ from the API's: its yes-or-no answer is `bool`
+with `probability`, where the API's is `noul` with `noul`, and its score answer has no `probabilities` or `legend`.
+Taking the API's answers too would keep one form from the request to the trace. It also changes the answers in the
+trace, legal-judge's scoring and the viewer.
+
 ## Out of scope
 
 - Saving only what changed between two states, in place of each whole state. A later PR can do it if traces grow too
