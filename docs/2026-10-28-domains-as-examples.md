@@ -8,10 +8,11 @@ date: 2026-10-28
 
 ## TL;DR
 
-A run of switch becomes one state machine. Each case has an initial state S₀. The choice function takes the latest
-state and gives the choices, the model picks one, and the transition function takes the state and the picked choice
-and gives the next state. The trace saves every state, so a replay runs no transition again. This is the fourth and
-last PR of this plan. Old traces need the `jq` command that it adds, and `run --steps-from` becomes `run --state-from`.
+A run of switch becomes one state machine: from an initial state S₀, the choice function gives the choices in the
+latest state, the model picks one, and the transition function gives the next state. switch knows nothing about any
+domain, so the trace holds only the states, the choices, the picks and the answers, and the chess styles leave
+switch's page. A replay reads the saved states and runs no transition again. This is the fourth and last PR of this
+plan; old traces need the `jq` command that it adds, and `run --steps-from` becomes `run --state-from`.
 
 ## Done
 
@@ -34,6 +35,29 @@ which finds an observation that becomes the next step.
 That is two concepts for one idea: where a case is now. It also does not match the usual math of a state machine,
 which has one state, an initial state, a function that gives the choices in a state, and a function that gives the
 next state. This PR makes the code and the docs follow that math.
+
+switch also still knows things about its two examples, which it must not:
+
+- The trace's first entry, `case`, names the case. The trace does not need it: S₀ says where the run starts, and the
+  folder that holds the trace names the case.
+- The trace's `asked` entries carry legal-judge's answer stages. A domain without stages, such as chess, still gets
+  an `asked` entry named "answers", with the same answers as the `answers` entry after it.
+- `src/view/page.ts` holds the chess styles: the board, the squares, the pieces, the arrows, the check mark, the
+  player bars, the move list and the board colors. The stage size is named `--board`.
+- Comments and help texts in `src/` name legal-judge, its judge files, its rubric items and its labels, and the chess
+  pieces and PGN: in `src/core/types.ts`, `src/cli/program.ts`, `src/cli/sets.ts`, `src/cli/root.ts` and
+  `src/view/web/app.ts`.
+
+## Rule
+
+switch knows nothing about any domain. `src/`, the trace and the page have no domain's words, fields, file formats,
+styles or special cases, also in the comments, help texts and examples in `src/`. A domain brings what it needs
+through switch's general parts: its state, its choice function, its transition function, its view, its questions, its
+own hooks, and its part of the page with its own styles. A concept goes into switch only when it means the same thing
+for any domain.
+
+`AGENTS.md` has this rule. A test makes it hold: it reads every file in `src/` and fails on the words chess,
+legal, judge, rubric, Stockfish and PGN.
 
 ## Formulation
 
@@ -70,9 +94,9 @@ state.
 ```ts
 /** One thing that the model can do in a state. Stop is a choice too, which switch adds with the type and key "stop". */
 interface Choice {
-  /** What sort of choice it is, such as "read" or "move", for the trace and the viewer. */
+  /** What sort of choice it is, for the trace and the viewer. */
   readonly type: string;
-  /** Unique in a run, such as "move:0:e2e4". */
+  /** Unique in a run. */
   readonly key: string;
   /** What the model reads. */
   readonly text: string;
@@ -107,7 +131,7 @@ interface Domain<S extends JsonObject, C extends Choice = Choice> {
   readonly limits: Limits;
   caseId(folder: string): Promise<string>;
   load(folder: string): Promise<StateMachine<S, C>>;
-  /** How the case ended in the domain's own terms, such as a game's result, from its last state. */
+  /** How the case ended in the domain's own terms, from its last state. */
   outcome?(state: S, result: RunResult<S>): JsonObject;
 }
 ```
@@ -169,15 +193,18 @@ Before the model sees the choices, switch:
 
 The trace saves every state. Its entries:
 
-| Entry     | What it holds                                                                   |
-| --------- | ------------------------------------------------------------------------------- |
-| `case`    | the case, the domain, its version, the model and the limits                     |
-| `state`   | `step` and the whole `state`; step 0 holds S₀, and one follows each transition  |
-| `choices` | `step` and the choices that the model saw, stop included: key, type, text, data |
-| `pick`    | `step`, the picked key, the probabilities by key, the confidence and the usage  |
-| `answers` | the answers to the questions                                                    |
-| `asked`   | the answers of one answer stage                                                 |
-| `note`    | a message, such as what the view left out                                       |
+| Entry     | What it holds                                                                               |
+| --------- | ------------------------------------------------------------------------------------------- |
+| `start`   | the domain, its version, the model and the limits                                           |
+| `state`   | `step` and the whole `state`; step 0 holds S₀, and one follows each transition              |
+| `choices` | `step` and the choices that the model saw, stop included: key, type, text, data             |
+| `pick`    | `step`, the picked key, the probabilities by key, the confidence and the usage              |
+| `stage`   | the name and the answers of one stage of a domain's own `answer`; only such a domain has it |
+| `answers` | the final answer to each question                                                           |
+| `note`    | a message, such as what the view left out                                                   |
+
+The trace names no case. The viewer and `replay` take the case's name from the folder that holds the trace, as the
+run's layout gives it: `cases/<case>/trace.jsonl`.
 
 A whole state in each entry keeps the trace simple. For the two examples, a trace stays below about 1.5 MB for one
 case: a chess game has at most 201 states of a few KB, and a legal-judge case at most 9 states of at most about 120
@@ -218,6 +245,10 @@ The trace has every state, so a replay runs no transition and calls no model:
 | `buildMenu` and `MenuError`                               | `offerChoices` and `ChoiceError`                               |
 | the `Ending` values `"empty menu"` and `"no choice"`      | `"no choices"` and `"pick failed"`                             |
 | the trace entries `observation`, `menu` and `choice`      | `state`, `choices` and `pick`                                  |
+| the trace entry `case`, and `RunOptions.case`             | the trace entry `start`, with no case                          |
+| `asked` entries, for any domain                           | `stage` entries, only for a domain with its own `answer`       |
+| the chess styles in `src/view/page.ts`                    | the chess part's stylesheet                                    |
+| the stage size `--board` in the page's styles             | `--stage`                                                      |
 | `run --steps-from`, and `stepsFrom` in `run.json`         | `run --state-from`, and `stateFrom`                            |
 
 After this PR, "state" has one meaning in switch: Sₜ. The model's API calls the JSON that the model reads `state`.
@@ -307,15 +338,21 @@ interface LegalState {
 - Without a domain part, the page shows what each step changed: each top-level field of the state whose value
   changed, and, for a list that only grew, its new entries. For legal-judge that is the new evidence.
 - A domain part's hooks get the states.
+- The page shows the case's name from the folder that holds the trace.
+- A `DomainViewer` names its part's stylesheets as `styles: readonly URL[]`, and the page adds them after its own.
+  The chess styles move from `src/view/page.ts` into the chess part's stylesheet: the board, the squares, the pieces,
+  the arrows, the check mark, the player bars, the move list and the board colors. switch's page keeps only the
+  layout, the panels and the controls, and names the stage size `--stage`.
 
 ## Docs
 
 - The README's "How it works" describes the state machine with the terms above, and "Write a harness" shows a small
   domain with its state, `initial`, `choices` and `transition`.
 - The example READMEs describe each example's state, initial state, choice function and transition function.
-- `AGENTS.md` gets the terms. Its boundaries say that `load`, `initial()`, the transition and the view's image reads
-  are the only parts of a run that read files or start programs, and that the choice function reads only the state
-  and the case's fixed data.
+- `AGENTS.md` gets the terms. It already has the rule. Its boundaries say that `load`, `initial()`, the transition
+  and the view's image reads are the only parts of a run that read files or start programs, and that the choice
+  function reads only the state and the case's fixed data.
+- The comments and help texts in `src/` that name an example get general words.
 - `docs/2026-10-28-the-math-behind-switch.md` becomes an abstract explainer. It has one state Sₜ, S₀, the choice
   function, the model's pick and the transition function, and then what switch does to the choices, one pick, a run,
   the replay and the window, with symbols only. It names no model, no example's numbers, no file path and no flag.
@@ -328,7 +365,10 @@ interface LegalState {
   pick fails.
 - The choices: the run refuses two choices with one key or one text, and a key already picked. It cuts by priority
   and adds stop.
-- The trace has `state`, `choices` and `pick` entries.
+- The trace starts with a `start` entry that names no case, and has `state`, `choices` and `pick` entries. It has
+  `stage` entries only when the domain has its own `answer`.
+- The rule: no file in `src/` has the words chess, legal, judge, rubric, Stockfish or PGN.
+- The page without a domain part has no chess styles, and the chess part's page has them.
 - Replay: with a transition that throws, a replay still passes. A recorded pick that is not on the choices fails the
   replay. A fork from Sₙ runs the transitions after step n. `run --state-from` takes the last state and asks only the
   questions.
@@ -350,14 +390,14 @@ interface LegalState {
 
 This PR replaces the old contract in place. switch keeps no reader for the old trace entries.
 
-| Before                   | What to do                                                                                                                                                                                                                                                          |
-| ------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| A trace                  | Turn it into states with the example's `jq` command, which this PR adds to each example's README after a try on a copy of a run. The legal-judge command also reads the case's `case.json`, to name the file of each image from its label.                          |
-| A `run.json`             | Rename `stepsFrom` to `stateFrom` with `jq '.stateFrom = .stepsFrom \| del(.stepsFrom)' run.json > run.renamed.json`.                                                                                                                                               |
-| A `result.json`          | Nothing.                                                                                                                                                                                                                                                            |
-| A `requests.jsonl`       | Nothing. Only the run totals read it, and they read only the usage.                                                                                                                                                                                                 |
-| `run --steps-from <run>` | `run --state-from <run>`                                                                                                                                                                                                                                            |
-| A domain of your own     | Merge its setup into one `Domain`, and give a JSON state type and a `load` that makes a `StateMachine` for each case folder. Move the code of each choice's `run` into the transition, and the world into the functions. Use `type` on choices and `json` on views. |
+| Before                   | What to do                                                                                                                                                                                                                                                                                                                                                                                        |
+| ------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| A trace                  | Turn it into states with the example's `jq` command, which this PR adds to each example's README after a try on a copy of a run. The command also turns the `case` entry into a `start` entry without the case, renames `asked` to `stage`, and drops an `asked` entry named "answers". The legal-judge command also reads the case's `case.json`, to name the file of each image from its label. |
+| A `run.json`             | Rename `stepsFrom` to `stateFrom` with `jq '.stateFrom = .stepsFrom \| del(.stepsFrom)' run.json > run.renamed.json`.                                                                                                                                                                                                                                                                             |
+| A `result.json`          | Nothing.                                                                                                                                                                                                                                                                                                                                                                                          |
+| A `requests.jsonl`       | Nothing. Only the run totals read it, and they read only the usage.                                                                                                                                                                                                                                                                                                                               |
+| `run --steps-from <run>` | `run --state-from <run>`                                                                                                                                                                                                                                                                                                                                                                          |
+| A domain of your own     | Merge its setup into one `Domain`, and give a JSON state type and a `load` that makes a `StateMachine` for each case folder. Move the code of each choice's `run` into the transition, and the world into the functions. Use `type` on choices and `json` on views.                                                                                                                               |
 
 A run from before #26 first needs the renames of #26. These commands write new files, and you replace the old files
 after a check:

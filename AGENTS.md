@@ -27,11 +27,19 @@
 - Keep functions under the lint limits: complexity 8 and 80 lines. Split them by responsibility; do not raise a limit.
 - A suppression comment needs a reason after `--`.
 
+## No domain in switch
+
+- switch knows nothing about any domain. `src/`, the trace and the page have no domain's words, fields, file formats,
+  styles or special cases. This also holds for the comments, help texts and examples in `src/`.
+- A domain brings what it needs through switch's general parts: its state, its choice function, its transition
+  function, its view, its questions, its own hooks, and its part of the page with its own styles.
+- A concept goes into switch only when it means the same thing for any domain.
+
 ## Boundaries
 
 `slophammer.yml` enforces these:
 
-- `src/` is switch, and knows no domain. `src/core` imports nothing else from `src`. It holds the building blocks, the
+- `src/` is switch, and imports no domain. `src/core` imports nothing else from `src`. It holds the building blocks, the
   loop, the menu, the trace, replay and the setup type that runs a domain on case folders.
 - `src/models`, `src/view` and `src/testing` import only `src/core`. `src/view` turns a trace into a web page that
   shows any domain's run. A domain may give its own part of the page, such as the chess board: browser modules that
