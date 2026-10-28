@@ -693,6 +693,119 @@ Status: noted, not fixed. A review of the code and the docs found these besides 
    copies can drift apart. `runnerOf` could build this definition itself and take a domain's own definition only when
    it has one, as legal-judge has its judge file. Open: a design choice for the owner.
 
+### From a second review
+
+A second review, which did not see the list above, found items 1 and 4 to 8 and the reshapes of pi-ai's forms again,
+and these besides. Each one was checked in the code, except item 34.
+
+**Replay and `--state-from`.** These change what a run does.
+
+9. **`--state-from` can make new picks or stop early.** It repeats as many picks as the source trace has, but with
+   today's limits (`src/cli/commands.ts:68`), not the trace's, as `replayCase` takes them. With a higher step limit, or
+   a source case whose pick failed, the model makes new picks and transitions run; with a lower one, the run stops
+   before the recorded last state. The README, the help text and `RunCasesOptions` say that only the questions go to
+   the model again. To do: take the trace's limits, and end where the recording ended.
+10. **Replay finds a recorded pick by its text, not by its key** (`src/core/replay.ts:127-128`). A stop pick no longer
+    replays when the definition changes the stop text, as `run --state-from … --judge` does, and a choice whose key
+    changed but whose text did not still passes. `offerChoices` also lets a choice have the stop's text. To do: match
+    by key, and refuse a choice with the stop's text.
+11. **A replay of a case whose pick failed ends with stop** (`replay.ts:117`). When the recorded picks run out, the
+    replay answers the next pick with stop at probability 1; in chess, that becomes a resignation. To do: end with the
+    recorded ending.
+12. **A replay of a trace whose answers failed throws** (`replay.ts:146`). Its `ReplayError` is not an `AskError`, so
+    it escapes `run`, and the case gets no result. To do: repeat the recorded failure.
+13. **An unknown pick label counts as stop** (`src/core/loop.ts:139`). A label that is neither a choice's nor `stop`
+    ends the steps as `stop`, and the trace records the label as the pick's key. To do: count it as a failed pick.
+14. **Replay knows a pick by the question id `next`** (`replay.ts:98-101`), which a domain could use for a question
+    of its own. To do: refuse that id for a domain's question, or mark pick requests in another way.
+15. **A resumed run does not compare the definition** (`commands.ts:121-122`). The check leaves out
+    `definition.hash`, so a run can go on with another judge file. legal-judge works around it by putting the hash in
+    its version. To do: compare the hash, and take it out of legal-judge's version.
+
+**What a run records.**
+
+16. **The `replay` command keeps nothing** (`commands.ts:176`). Its trace is written nowhere, so a fork's new picks and
+    states are lost, and it prints no outcome or ending. To do: an `--out` that writes a trace and a result, as `run`
+    does.
+17. **A failed answer leaves no note in the trace** (`loop.ts:173`). The error goes only to `result.json`. The
+    viewer's frames also put every note after the steps on the last step. To do: note the failure in the trace, and
+    show notes after the steps on their own.
+18. **Failed picks and cases that throw are missing from the results and the totals.** A failed pick is only a note in
+    the trace, with `error: null` in `result.json`. `totals.failed` counts only `error`, and a case that throws gets no
+    `result.json`, so `totals.cases` leaves it out. To do: record and count every case's failure.
+19. **Repeated picks get made-up values** (`replay.ts:8`, `:132`). A `--state-from` run writes each repeated pick with
+    probability 1, no confidence and 0 tokens, where the source trace has the real values. To do: copy the recorded
+    pick, or mark it as repeated.
+20. **The usage in the trace is counted twice and is incomplete** (`loop.ts:170`, `:204-205`). Each `stage` entry has
+    its usage, and the `answers` entry repeats it. Retries after a request that was too long keep only the last
+    attempt's usage, and a failed pick's usage is lost. To do: each entry records the usage of every request it made,
+    once, together with the usage change above.
+21. **The trace's `parent` is always the entry before it** (`src/core/trace.ts:133`), and nothing reads it. A fork
+    writes a new trace, so a trace is never the tree that `trace.ts` describes. To do: remove `parent`, or write forks
+    into the same trace.
+22. **`requests.jsonl` has no schema.** The totals and `src/cli/source.ts` read it with a cast, where AGENTS.md wants
+    a zod schema for data from outside the process. To do: a schema for the decision request and result above.
+
+**The viewer.**
+
+23. **The viewer hides the answers of a case without an outcome** (`viewer/src/web/panels.ts:87-88`, `:109-110`). It
+    then shows only "The case ended without an outcome.". legal-judge gives no outcome, so its verdicts never show,
+    and the session has no error either. To do: show the answers and the error in every case.
+24. **"Model confidence" in the viewer is the pick's probability** (`viewer/src/web/model.ts:90`, `panels.ts:134`).
+    The trace's `confidence` is the API's rescaled value, which the viewer never shows, and the chess README repeats
+    the chart's name. To do: name the chart for what it shows, or plot the recorded confidence.
+25. **The viewer uses switch's terms with other meanings:** `stage` for its drawing area, where switch has answer
+    stages, "view" for what the page shows, where the view is what the model reads, and `endingOf` for the outcome,
+    where `Ending` is why the steps ended. To do: other names in the viewer.
+26. **Chess is still in the viewer.** `--stripe` and `--line` in its styles (`viewer/src/page.ts:60`) are used only by
+    chess's stylesheet, and `viewer/README.md` describes the chess board, its sound button and its PGN download. To
+    do: remove the two variables, and leave chess's description to its own README.
+
+**Docs that disagree with the code.**
+
+27. **legal-judge's README** says that `replay` uses "the judge file that the trace was made with" (line 131), and
+    that `requests.jsonl` keeps each request "exactly as the model received it" (lines 66-67). Neither is true. To do:
+    correct the texts, or check the trace's definition.
+28. **A comment counts the retries wrong.** `loop.ts:239` says "sends a smaller view, up to three times", but
+    `ATTEMPTS = 3` means three requests in all. To do: "up to three requests in all".
+29. **The math doc's pick and score sections.** It gives a score the choice's confidence (`docs/MATH.md:112-113`),
+    where System One uses the distance formula in `DECISION_MODEL_API.md`. It says that the API labels the choices and
+    that θ is a temperature that one can set (lines 86-93), but switch makes the labels itself and passes no
+    temperature. To do: correct both.
+30. **The window.** The math doc and the README say that switch fits every request into the window
+    (`docs/MATH.md:8`, `README.md:30`). switch only gives the view function a budget and retries: a state without a
+    view function, an answer stage's fixed JSON and images are never cut, and τ₁ in the doc leaves out what the code
+    subtracts for `extra`. To do: describe the budget and the retries.
+31. **Chess's endings.** Chess calls the step limit "move limit" (`examples/chess/src/index.ts`), and its outcome gets
+    only whether the model resigned, so a failed pick also comes out as "unfinished, move limit". Its README and the
+    math doc say that the board is never stored, but the state keeps `fen`. To do: give the outcome `ended`, say "step
+    limit", and correct the two texts.
+32. **The README's first lines** say that a decision model "reads a state" and picks "one of a list of options", and
+    `package.json` calls switch "a harness" that works "by choosing from steps". AGENTS.md reserves "state" and bans
+    "option". To do: the current terms.
+33. **AGENTS.md's boundary** says that file work stays in `ingest/`, `load.ts`, `setup.ts` and `viewer.ts`, but
+    legal-judge's `definition.ts` and `score/scores.ts` read files too. To do: correct the text, with item 7.
+34. **The Node version.** The README and `package.json` ask for Node 22.13, but the examples and the viewer run from
+    TypeScript sources, and Node strips types without a flag only from 22.18. Not yet checked. To do: check, then
+    raise the version or add the flag.
+
+**Names and repeated values.**
+
+35. **The pick has three names:** the purpose `"choose"`, the question id `"next"` and the trace's `pick`. To do:
+    "pick" everywhere.
+36. **View functions repeat the characters per token.** Chess has `CHARS_PER_TOKEN = 3` and legal-judge
+    `charsPerToken: 3`, while the decider has its own value, which the replay decider sets to 4. To do: give the view
+    function the decider's value, or an estimate function.
+37. **switch makes its own key variable**, `${PROVIDER}_API_KEY` (`src/cli/program.ts:30-38`), whose names differ from
+    pi-ai's for some providers, such as `CLOUDFLARE_API_KEY`. To do: pass a key only for `--api-key-env`, and let
+    pi-ai find the others.
+38. **Unused exports and a repeated check.** `traceEntrySchema` and `setSchema` are used only in their own files,
+    `startOf` only in a test, and the viewer exports `VIEW_PORT`, `caseSession`, `savedPage` and `viewServer`, which
+    nothing outside it uses. The check that a trace starts with its start entry is written three times, in
+    `trace.ts`, `replay.ts` and `viewer/src/frames.ts`. To do: remove the unused exports, and use `startOf`.
+39. **Two kinds of `LIMITS`.** legal-judge's `LIMITS` holds its own sizes, but chess's `LIMITS` is switch's `Limits`.
+    To do: another name in legal-judge, such as `SIZES`.
+
 ## Out of scope
 
 - Saving only what changed between two states, in place of each whole state. A later PR can do it if traces grow too
