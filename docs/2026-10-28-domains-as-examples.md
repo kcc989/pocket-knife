@@ -654,6 +654,45 @@ What changes:
 What stays: switch keeps pi-ai as a dependency, and calls it only from `src/models`. The core has its own copies of
 these types, so that it imports nothing from pi-ai.
 
+## Other discrepancies
+
+Status: noted, not fixed. A review of the code and the docs found these besides the reshapes of pi-ai's forms above.
+
+**What a run records.**
+
+1. **Why a case ended.** `RunResult.ended` says why the steps ended: `stop`, `no choices`, `step limit` or
+   `pick failed`. `result.json` does not keep it, so a run cannot tell a model that stopped from one that ran out of
+   steps, unless the domain's outcome copies it, as chess does. To do: `result.json` records `ended`, as part of the
+   decision request change.
+2. **The view function in the math doc.** `docs/MATH.md` writes $V(S, \tau)$, without the purpose that the code
+   passes. To do: $V(S, p, \tau)$, as part of the decision request change.
+
+**One idea with two names.**
+
+3. **A domain has four names.** `Domain` is the interface, `Runner` is a domain without its state type,
+   `HarnessDomain` is a domain with its flags and its setup, and `Domains` is a harness's set of them. `domainOf`
+   returns a `HarnessDomain`, and `domainNamed` returns a `Runner`. Open: a design choice for the owner.
+4. **Exchange and requests.** The requests file, `requests.jsonl` and `CaseFiles.requests`, holds values of the type
+   `Exchange`, which `recording` makes. To do: one name for both.
+
+**Stale words.**
+
+5. **`switch run`.** `src/cli/runs.ts` and legal-judge's `src/score/score.ts` say what "`switch run`" writes, but no
+   program is called switch: each harness has its own `run`. To do: "a harness's `run`".
+6. **Banned old words in the examples.** legal-judge's `src/definition.ts` says "the menu's instructions", and chess's
+   `src/web/model.ts` and legal-judge's `src/choices/changes.ts` use `kind` for a piece's and a file's type. To do:
+   the current words.
+7. **AGENTS.md points to an old plan.** It says to read `docs/2026-10-25-switch-plan.md` before changing the design,
+   and that plan still uses world, actions and `src/view.ts`. To do: point to the README's "How it works" and
+   `docs/MATH.md`.
+
+**Repeated values.**
+
+8. **The definition repeats the shared texts.** A domain gives `stop`, `instructions` and `limits`, and then repeats
+   them in `definitionOf(name, { stop, instructions, limits })`, as chess and the README's example do, so the two
+   copies can drift apart. `runnerOf` could build this definition itself and take a domain's own definition only when
+   it has one, as legal-judge has its judge file. Open: a design choice for the owner.
+
 ## Out of scope
 
 - Saving only what changed between two states, in place of each whole state. A later PR can do it if traces grow too
