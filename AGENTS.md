@@ -1,6 +1,6 @@
 # AGENTS.md
 
-- Read the README's "How it works", [docs/MATH.md](docs/MATH.md) and
+- Read the README's "Concepts" and "How a run works", [docs/DOMAINS.md](docs/DOMAINS.md), [docs/MATH.md](docs/MATH.md) and
   [docs/DECISION_MODEL_API.md](docs/DECISION_MODEL_API.md) before you change the design. The dated docs in `docs/` are
   plans and reports of their day; the latest plan is
   [docs/2026-10-29-questions-as-steps.md](docs/2026-10-29-questions-as-steps.md).
@@ -14,7 +14,7 @@
 
 ## Terms
 
-- Use the terms of switch, as the README's "How it works" defines them, in code and docs: state, initial state,
+- Use the terms of switch, as the README's "Concepts" defines them, in code and docs: state, initial state,
   question function, question, answer, transition function, step, view function, view, instructions, pick, choice,
   choice function, outcome, trace and type. A case is a state machine: an initial state, a question function from the
   latest state to the questions that the model must answer in it, and a transition function from the state and the

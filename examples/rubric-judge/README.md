@@ -147,8 +147,8 @@ The report adds three more numbers:
 `replay` runs a case again from its trace, with the judge file that `--judge` names, or the default judge. Give it the
 judge file that the run used, which the run's `run.json` records as its definition; the replay's trace notes it when
 the hashes differ. With `--fork <steps>` it takes the
-state after that many recorded steps and lets the model go on from there. The
-[main README](../../README.md#replay-a-case) says how a replay repeats a case.
+state after that many recorded steps and lets the model go on from there.
+[docs/DOMAINS.md](../../docs/DOMAINS.md#replay) says how a replay repeats a case.
 
 ## Check
 
