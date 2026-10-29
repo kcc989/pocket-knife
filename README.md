@@ -64,10 +64,10 @@ A run also ends when a request fails, or at a step limit that a domain may set a
 
 ## Install
 
-switch needs Node.js 22.18 or newer and pnpm. Add it to a project pinned to a commit:
+switch needs Node.js 22.18 or newer. Add it to a project from npm:
 
 ```bash
-pnpm add github:osolmaz/switch#<commit>
+npm install @osolmaz/switch
 ```
 
 | Import                    | What it gives                                                        |
@@ -76,6 +76,15 @@ pnpm add github:osolmaz/switch#<commit>
 | `@osolmaz/switch/models`  | `piAiDecider`, which asks a classifier model that pi-ai lists        |
 | `@osolmaz/switch/cli`     | `commandLine`, which gives a harness the `run` and `replay` commands |
 | `@osolmaz/switch/testing` | A fake decider for tests that make no model calls                    |
+
+The examples and the [viewer](viewer/README.md) live in this repository and are not on npm. To run them, clone it and
+install its workspace with [pnpm](https://pnpm.io):
+
+```bash
+git clone https://github.com/osolmaz/switch.git
+cd switch
+pnpm install
+```
 
 ## Examples
 
@@ -217,7 +226,7 @@ examples/chess/src/main.ts replay examples/chess/cases/white-seed-1 runs/chess/c
 
 - `run` writes a run folder with each case's result, trace and requests. A stopped run goes on where it stopped.
 - `view` plays a run back in the browser, step by step, and follows cases live. It is the
-  [viewer](viewer/README.md), a separate package that the examples add.
+  [viewer](viewer/README.md), a separate package in this repository that the examples add.
 - `replay` runs a case again from its trace without the model. With `--fork <n>`, it repeats the first n steps and
   lets a model go on from there.
 

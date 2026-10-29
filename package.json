@@ -1,14 +1,32 @@
 {
 	"name": "@osolmaz/switch",
-	"version": "0.1.0",
-	"private": true,
+	"version": "0.1.1",
 	"description": "A framework for decision-model harnesses: a decision model works through a task by answering the questions that code asks.",
+	"keywords": [
+		"decision-models",
+		"classifier-models",
+		"eval",
+		"harness",
+		"llm",
+		"typescript"
+	],
+	"homepage": "https://github.com/osolmaz/switch#readme",
+	"bugs": {
+		"url": "https://github.com/osolmaz/switch/issues"
+	},
+	"repository": {
+		"type": "git",
+		"url": "git+https://github.com/osolmaz/switch.git"
+	},
 	"license": "MIT",
 	"type": "module",
 	"engines": {
 		"node": ">=22.18.0"
 	},
 	"packageManager": "pnpm@10.20.0",
+	"publishConfig": {
+		"access": "public"
+	},
 	"exports": {
 		".": {
 			"switch-source": "./src/core/index.ts",
