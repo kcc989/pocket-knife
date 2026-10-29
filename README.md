@@ -118,9 +118,8 @@ domain's code no longer asks the questions that the run answered: other ids or t
 gone, questions where the run ended, or none where it asked. A recorded pick is found by its choice's key, so a choice
 whose text or label changed since still fits. A definition that changed since is noted in the replay's trace. With
 `--fork <n>`, `replay` repeats only the first n steps, and the model that `--model` names answers from there, with the
-transitions running again. A fork thus also asks a case's last questions again under another definition or model, such
-as rubric-judge's checks under another judge file. With `--out <folder>`, it writes the replay as a run folder of one
-case, which the viewer can show:
+transitions running again. With `--out <folder>`, it writes the replay as a run folder of one case, which the viewer
+can show:
 
 ```bash
 examples/chess/src/main.ts replay examples/chess/cases/white-seed-1 runs/chess/cases/white-seed-1/trace.jsonl --fork 5 --out runs/fork

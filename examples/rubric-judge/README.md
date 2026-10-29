@@ -97,15 +97,6 @@ examples/rubric-judge/src/main.ts run --set sets/quick.json --out results-legal 
 examples/rubric-judge/src/main.ts compare results results-legal --set sets/quick.json
 ```
 
-To ask another judge file or model over the evidence that a run gathered, fork a case's trace before its checks, which
-are its last step: at one less than the `steps` of its `result.json`. The fork repeats the gathering from the trace
-and asks only the checks again, for about a third of the cost of a new run, and writes a run folder of one case. There
-is no command yet that forks every case of a set:
-
-```bash
-examples/rubric-judge/src/main.ts replay cases/case-1 results/cases/case-1/trace.jsonl --fork 5 --out forks/case-1 --judge examples/rubric-judge/judges/legal.json
-```
-
 ## Verdicts
 
 The judge asks two bool questions about each rubric item: whether the answer meets the item, with probability $a$,
