@@ -4,15 +4,35 @@
 
 # switch
 
-switch is a TypeScript framework for building harnesses around decision models. It runs a model through a task one
-step at a time: your code asks typed questions, and the model's answers move the task to its next state.
+switch is a harness framework for decision models like Jev. It gives a decision model an agent loop for finite
+choices. Your code turns the state of a task into typed questions, such as which next step to take from a short list,
+and the model picks the answers.
 
-A decision model answers typed questions with probabilities and writes no text, so it cannot make the tool calls of
-the usual agent loop. TypeSafe calls these models [System One models](https://docs.typesafe.ai/concepts/system-one),
-and its Jev was the first; [llama.cpp serves open ones](https://huggingface.co/blog/ggml-org/decision-models-in-llamacpp)
-through the same API. switch works with any classifier model that
-[pi-ai](https://www.npmjs.com/package/@earendil-works/pi-ai) lists, as
-[docs/DECISION_MODEL_API.md](docs/DECISION_MODEL_API.md) explains.
+A decision model answers typed questions with probabilities and writes no text, so it cannot generate the tool calls
+that a coding agent harness such as [Pi](https://pi.dev) relies on. switch generates the tool calls for it in code,
+and the model only picks one from that finite set. TypeSafe calls these models
+[System One models](https://docs.typesafe.ai/concepts/system-one), and its Jev was the first;
+[llama.cpp serves open ones](https://huggingface.co/blog/ggml-org/decision-models-in-llamacpp) through the same API.
+
+switch puts what many people already write by hand, a decision-model API called over several steps, behind one
+abstract interface. You implement a domain, which defines the state of a task and the functions that turn a state into
+the model's questions and its answers into the next state. Chess is a domain, and so is a rubric judge for evals.
+
+## Uses
+
+A main use is a judge in an eval. At the end of a task run that involves many documents, the usual judge extracts the
+text of the PDF, Word and Markdown files and puts all of it into the context. When the visual formatting of the output
+is a criterion, every page has to go in as an image too. With 200 pages and a question that needs only a few of them,
+most of that context is wasted. With switch, the decision model navigates the documents and takes in only what it
+needs. The [rubric judge](examples/rubric-judge/README.md) works this way. It reads parts of files, looks at page
+images and searches for terms, one step at a time, until it can grade each rubric item.
+
+switch works with any decision model that [pi-ai](https://www.npmjs.com/package/@earendil-works/pi-ai) lists as a
+classifier, Jev among them, as [docs/DECISION_MODEL_API.md](docs/DECISION_MODEL_API.md) explains. Jev itself is weak
+at chess, and as a judge it is not yet good enough to replace the strongest chat models. Once a better model has
+generated enough data, an open decision model can be fine-tuned on one domain. Trained in a harness like switch's, it
+should do that job both better and more cheaply. A narrow domain leaves a lot to gain, since an agent built for one
+specific job could cost a hundredth of what a general model costs.
 
 ## Concepts
 
