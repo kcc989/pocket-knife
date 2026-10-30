@@ -12,6 +12,7 @@ cases/
 # data.
 !examples/chess/cases/
 !examples/wikirace/cases/
+!examples/doc-extract/cases/
 results/
 out/
 *.trace.jsonl

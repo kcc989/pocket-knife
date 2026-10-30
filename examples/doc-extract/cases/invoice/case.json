@@ -1,0 +1,13 @@
+{
+	"id": "invoice",
+	"fields": {
+		"invoice_number": { "kind": "text", "instructions": "The invoice number" },
+		"invoice_date": { "kind": "date", "instructions": "The invoice date" },
+		"customer": { "kind": "text", "instructions": "The customer who is billed" },
+		"total_due": {
+			"kind": "number",
+			"instructions": "The total amount due",
+			"field": { "decimals": 2, "unit": "USD" }
+		}
+	}
+}

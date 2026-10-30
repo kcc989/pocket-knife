@@ -1,0 +1,13 @@
+{
+	"id": "receipt",
+	"fields": {
+		"store": { "kind": "text", "instructions": "The name of the store" },
+		"total_paid": {
+			"kind": "number",
+			"instructions": "The total amount paid",
+			"field": { "decimals": 2, "unit": "USD" }
+		},
+		"purchase_date": { "kind": "date", "instructions": "The purchase date" },
+		"loyalty_number": { "kind": "text", "instructions": "The loyalty program member number" }
+	}
+}

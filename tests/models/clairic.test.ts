@@ -16,13 +16,13 @@ function fakeRun(output: unknown) {
 const OUTPUT = {
 	model: "clairic",
 	answers: {
-		invoice_number: {
+		order_number: {
 			type: "text",
 			p_null: 5.5e-6,
 			span: [8, 16],
-			guess: "INV-2291",
+			guess: "ORD-2291",
 			confidence: 0.99998,
-			value: "INV-2291",
+			value: "ORD-2291",
 		},
 		q1: { type: "number", p_null: 1e-6, guess: 1080, confidence: 0.9999, value: 1080, source: "image", span: null },
 		contacts: {
@@ -34,7 +34,7 @@ const OUTPUT = {
 			],
 			confidence: 0.99,
 		},
-		po_number: { type: "text", p_null: 0.99, span: [8, 16], guess: "INV-2291", confidence: 0.999, value: null },
+		po_number: { type: "text", p_null: 0.99, span: [8, 16], guess: "ORD-2291", confidence: 0.999, value: null },
 		pay: { type: "estimate", value: 31, mean: 30.7, median: 31, p10: 25, p90: 36, p_below: 1e-6, p_above: 3e-6 },
 	},
 	truncated: false,
@@ -42,11 +42,11 @@ const OUTPUT = {
 };
 
 const request: DecisionRequest = {
-	decisionState: { part: "Invoice" },
-	extractText: "Invoice INV-2291 from Northwind Supply",
+	decisionState: { part: "Order" },
+	extractText: "Order ORD-2291 from Northwind Supply",
 	decisionImages: [{ type: "image", label: "page 1", mimeType: "image/png", data: "AAAA" }],
 	decisionQuestions: {
-		invoice_number: { type: "value", kind: "text", instructions: "The invoice number" },
+		order_number: { type: "value", kind: "text", instructions: "The order number" },
 		"total due": { type: "value", kind: "number", instructions: "Amount due", field: { decimals: 2, unit: "USD" } },
 		contacts: { type: "value", kind: "list", instructions: "Contacts", field: { items: "text" } },
 		po_number: { type: "value", kind: "text", instructions: "Purchase order number", data: { note: "not sent" } },
@@ -65,10 +65,10 @@ describe("clairicDecider", () => {
 				model: "@cf/cloudflare/clairic",
 				input: {
 					model: "clairic",
-					state: "Invoice INV-2291 from Northwind Supply",
+					state: "Order ORD-2291 from Northwind Supply",
 					images: ["data:image/png;base64,AAAA"],
 					fields: {
-						invoice_number: { type: "text", instructions: "The invoice number" },
+						order_number: { type: "text", instructions: "The order number" },
 						q1: { type: "number", instructions: "Amount due", decimals: 2, unit: "USD" },
 						contacts: { type: "list", instructions: "Contacts", items: "text" },
 						po_number: { type: "text", instructions: "Purchase order number" },
@@ -90,11 +90,11 @@ describe("clairicDecider", () => {
 			model: "@cf/cloudflare/clairic",
 		});
 		expect(result.decisionAnswers).toEqual({
-			invoice_number: {
+			order_number: {
 				type: "value",
 				kind: "text",
-				value: "INV-2291",
-				guess: "INV-2291",
+				value: "ORD-2291",
+				guess: "ORD-2291",
 				pNull: 5.5e-6,
 				confidence: 0.99998,
 				span: [8, 16],
@@ -114,7 +114,7 @@ describe("clairicDecider", () => {
 				type: "value",
 				kind: "text",
 				value: null,
-				guess: "INV-2291",
+				guess: "ORD-2291",
 				pNull: 0.99,
 				confidence: 0.999,
 				span: [8, 16],
@@ -137,7 +137,7 @@ describe("clairicDecider", () => {
 			decisionState: request.decisionState,
 			decisionQuestions: request.decisionQuestions,
 		});
-		expect(fake.inputs[0]?.input.state).toBe('{"part":"Invoice"}');
+		expect(fake.inputs[0]?.input.state).toBe('{"part":"Order"}');
 		expect(fake.inputs[0]?.input).not.toHaveProperty("images");
 	});
 
