@@ -41,3 +41,41 @@ export const DEF14A_FIELDS: Readonly<Record<string, FieldSpec>> = Object.fromEnt
 		},
 	],
 ]);
+
+/** The other columns of the table's row, which the sum checks need; they are not scored. */
+const EXTRA: readonly (readonly [string, string])[] = [
+	["pension_change", "Change in Pension Value and Nonqualified Deferred Compensation Earnings"],
+	["all_other", "All Other Compensation"],
+];
+
+/** The DEF 14A fields with the columns that the sum checks need. */
+export const DEF14A_CHECKED_FIELDS: Readonly<Record<string, FieldSpec>> = {
+	...DEF14A_FIELDS,
+	...Object.fromEntries(
+		PLACES.flatMap((place, index) =>
+			EXTRA.map(([name, column]): [string, FieldSpec] => [
+				`neo${String(index + 1)}_${name}`,
+				{
+					kind: "number",
+					instructions: `The ${column} column of the ${place} named executive officer listed in the Summary Compensation Table, in the row for the latest fiscal year, in whole US dollars; 0 when the table shows a dash`,
+					field: MONEY,
+				},
+			]),
+		),
+	),
+};
+
+/** One sum check for each executive: the columns of the row add up to its Total. */
+export const DEF14A_CHECKS = PLACES.map((_, index) => {
+	const neo = `neo${String(index + 1)}`;
+	const columns = [
+		"salary",
+		"bonus",
+		"stock_awards",
+		"option_awards",
+		"non_equity_incentive",
+		"pension_change",
+		"all_other",
+	];
+	return { sum: columns.map((column) => `${neo}_${column}`), equals: `${neo}_total`, blankIsZero: true };
+});

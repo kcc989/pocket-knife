@@ -1,5 +1,105 @@
 # doc-extract eval
 
+## Round 2 (2026-10-30): fixes, a held-out set, and checks
+
+Round 1 (below) failed its DEF 14A pass conditions. Round 2 fixes the causes it found and measures on a **held-out
+set**: three new filings (Dorman, Cal-Maine, Weis Markets), labeled before any change and measured with the round-1
+code first. Dorman is too large for Clairic's window. Same 41 fields, same "found" rule (confidence ≥ 0.9, p_null ≤ 0.5);
+no threshold changed.
+
+### What changed
+
+| Change                                                                                                                                                                                                                        | Why (round-1 cause)                                                       |
+| ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------- |
+| The HTML converter builds each table as a grid (`colspan`, `rowspan`), finds the header rows, and writes every data cell with its column's name: `Salary ($): 575,000`                                                        | Rows lost their columns, so values shifted                                |
+| A short title line just before a table becomes a `## ` heading                                                                                                                                                                | Tables without bold titles had no part of their own                       |
+| `strategy: "whole"`: one read of the whole document through the harness                                                                                                                                                       | Lets the one-call reader use the checks below                             |
+| `checks`: sum checks in `case.json` (`{ sum, equals, blankIsZero }`). When a row's columns add up to its Total, its values are found, whatever Clairic's confidence. A Total that two rows share is never taken as right      | 70% of fields went to review although many were right                     |
+| Navigate: a read takes the picked part and the parts after it up to `readChars`; stop is offered only after a read that found nothing new; `finalRead` reads every part read at once at the end, and only those answers count | Jev stopped after 1–2 parts; confident wrong values piled up across reads |
+| `strategy: "select"`: Jev answers one yes/no question per part, Clairic reads the likeliest parts                                                                                                                             | Tried as a cheaper way to navigate                                        |
+| `clairicDecider`: `charsPerToken` 4 (measured 4.2 on filings), and `truncated: "keep"` to keep the answers of a text longer than the window                                                                                   | The old 2.3 cut views to a third of what fits                             |
+| Scoring: "/" with or without spaces matches                                                                                                                                                                                   | Cal-Maine titles such as "VP/ CFO"                                        |
+
+### Results (8 filings, 328 fields: dev 205, held-out 123)
+
+| Reader                      | Set      | Accuracy  | Found     | Wrong but found | Found right | Input tokens / filing | Cost / filing |
+| --------------------------- | -------- | --------- | --------- | --------------- | ----------- | --------------------- | ------------- |
+| Whole document, raw Clairic | dev      | 55.6%     | 25.9%     | 4.4%            | 83.0%       | 40,354                | $0.0040       |
+| Whole document + checks     | dev      | 54.1%     | 26.3%     | 3.9%            | 85.2%       | 41,296                | $0.0041       |
+| Navigated + checks          | dev      | 55.1%     | 31.2%     | 5.9%            | 81.2%       | 155,827               | $0.0136 ¹     |
+| One LLM                     | dev      | 81.0%     | 79.0% ²   | 9.8%            | 87.7%       | 37,139                | $0.0194 ³     |
+| Whole document, raw Clairic | held-out | 80.5%     | 39.8%     | 0.0%            | 100%        | 52,829                | $0.0053       |
+| **Whole document + checks** | held-out | **80.5%** | **58.5%** | **0.0%**        | **100%**    | 53,609                | $0.0054       |
+| Navigated + checks          | held-out | 82.1%     | 61.8%     | 0.0%            | 100%        | 212,994               | $0.0183 ¹     |
+| One LLM                     | held-out | 75.6%     | 100% ²    | 24.4%           | 75.6%       | 67,378                | $0.0345 ³     |
+| Whole document, raw Clairic | all      | 64.9%     | 31.1%     | 2.7%            | 91.2%       | 45,032                | $0.0045       |
+| **Whole document + checks** | all      | **64.0%** | **38.4%** | **2.4%**        | **93.7%**   | 45,913                | $0.0046       |
+| Navigated + checks          | all      | 65.2%     | 42.7%     | 3.7%            | 91.4%       | 177,265               | $0.0153 ¹     |
+| One LLM                     | all      | 79.0%     | 86.9% ²   | 15.2%           | 82.5%       | 48,479                | $0.0251 ³     |
+
+"Found right" is the share of found values that are right: what a reviewer can skip. ¹ Clairic only; Jev is not
+priced. ² Every value the LLM gives counts as found. ³ At an assumed Mistral price (see round 1).
+
+Calibration of Clairic's confidence, all 8 filings (right / values with that confidence):
+
+| Bucket    | Raw whole      | Whole + checks | Navigated + checks |
+| --------- | -------------- | -------------- | ------------------ |
+| 0.9+      | 93/102 (91.2%) | 95/103 (92.2%) | 100/112 (89.3%)    |
+| 0.7–0.9   | 52/61 (85.2%)  | 44/56 (78.6%)  | 49/65 (75.4%)      |
+| below 0.7 | 68/165 (41.2%) | 71/169 (42.0%) | 65/151 (43.0%)     |
+
+### What the numbers say
+
+- **Recommended reader: the whole document in one Clairic call, with sum checks.** On held-out filings it sent 58.5%
+  of fields straight through (raw Clairic: 39.8%) with no wrong value among them, at the same cost. Across all 8
+  filings, 93.7% of its found values are right and 0.9+ confidence is 92% right.
+- **Navigation does not pay for this task.** With the read window, the stop rule and the final read, navigated
+  Clairic matches the whole-document reader's accuracy (65.2% vs 64.0%) but reads most of each filing and costs 3.9×
+  the input tokens. On the dev filings its wrong-but-found rate fell from 7.3% (round 1) to 5.9%. All 8 filings but Dorman fit Clairic's
+  window, and Dorman's table sits early enough that the cut-off whole read still found it (97.6%). Navigation would
+  pay only for documents whose values sit beyond the window.
+- **Select-then-read failed.** Jev, asked per part whether it holds a missing value, gave the compensation table
+  0.17–0.29 on most filings and rated other tables higher. All 8 filings: 35.7% accuracy (v4 run). It stays in the
+  code as a strategy, not recommended for this task.
+- **The LLM reads best and is the least safe.** It has the highest accuracy but no confidence, so 15% of fields are
+  wrong with nothing to send them to review. On Cal-Maine it scored 2.4% or 26.8% across five runs: it lists the CEO before the board chair, who comes first in the table.
+- **Pass conditions of round 1**, with the recommended reader in place of "navigated": wrong but found 2.4% (target
+  ≤ 2%, held-out 0%), 0.9+ confidence 92.2% right (target ≥ 90%). The original navigated conditions still fail: it
+  uses more tokens than the whole-document reader.
+
+### What still limits accuracy
+
+1. **Malformed source tables.** Simpson's HTML leaves out a Bonus cell in one row and splits a column 2+1 in another;
+   a browser would shift those rows too.
+2. **Clairic fills absent columns and rows.** It gives the Option Awards value for a missing Stock Awards column, and
+   takes directors for a fourth and fifth executive. Most of these go to review.
+3. **Ordinal fields are fragile.** "The third executive listed" makes Clairic count rows. A probe that put the
+   executives' names in the instructions (from the answer key, so a ceiling) did not raise accuracy overall: it went
+   up on Weis (73% → 100% of money fields) and down on others, with more wrong values kept as found.
+4. **Checks need every column right.** One wrong addend breaks the sum, so most rows stay doubtful.
+
+### Clairic API findings, round 2
+
+- **Passes depend on the text's length.** A text of about 32,000 characters or more (with 41 fields) is read in
+  **one** pass. A shorter text is read in about one pass per four fields, and each pass bills the text again: one
+  4,668-character part with 41 fields used 11 passes and 25,399 input tokens; a 16,000-character excerpt of the same
+  filing used 1 pass and 9,763 tokens. The single pass was also as accurate or better (BMI excerpt: 56% vs 46%). This
+  is the reverse of what the docs say ("fields that do not fit next to the state in one 8,192-token pass are split
+  across parallel passes").
+- **Tokens:** Clairic counted 4.2 characters per token on filing text (34,225 state tokens for 144,678 characters),
+  against 2.3 on a short invoice line.
+- **Truncation:** a 475,000-character filing was cut at 65,529 input tokens with `truncated: true`, and the answers
+  from its start were still good.
+
+### Cost
+
+Round 2 spent about $1.85: the held-out baseline $0.11, runs v2–v7 $1.69, and probes about $0.05. With round 1, the
+eval has cost about $2.10, plus Jev requests, which are not priced.
+
+---
+
+## Round 1
+
 Run on 2026-10-30 with `typesafe/jev-latest` (served as jev-1.14.0), `@cf/cloudflare/clairic` and
 `mistral-large-latest`.
 

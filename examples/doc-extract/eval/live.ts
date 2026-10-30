@@ -3,7 +3,7 @@
  *
  *   node --conditions=switch-source eval/live.ts smoke --out <folder>
  *   node --conditions=switch-source eval/live.ts prepare --out <folder>
- *   node --conditions=switch-source eval/live.ts def14a --out <folder> [--yes]
+ *   node --conditions=switch-source eval/live.ts def14a --out <folder> [--set dev|holdout|all] [--readers a,b] [--yes]
  *
  * smoke runs the local cases with Jev and Clairic. def14a downloads each filing in eval/def14a from EDGAR, splits it
  * into parts, and compares three readers on it. Both need TYPESAFE_API_KEY, CLOUDFLARE_ACCOUNT_ID and
@@ -14,9 +14,8 @@ import { mkdir, readdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { parseArgs } from "node:util";
 import type { Json, JsonObject } from "@osolmaz/switch";
-import { extractorNamed } from "@osolmaz/switch/cli";
 import { builtinModels } from "@earendil-works/pi-ai/providers/all";
-import { cloudflareRest, piAiDecider, routedDecider } from "@osolmaz/switch/models";
+import { clairicDecider, cloudflareRest, piAiDecider, routedDecider } from "@osolmaz/switch/models";
 import { z } from "zod";
 import {
 	calibration,
@@ -27,13 +26,18 @@ import {
 	splitParts,
 	summary,
 } from "../src/index.ts";
-import { DEF14A_FIELDS } from "./fields.ts";
+import { DEF14A_CHECKED_FIELDS, DEF14A_CHECKS, DEF14A_FIELDS } from "./fields.ts";
 import { navigated, type Reading, structuredLlm, wholeClairic } from "./readers.ts";
 
 const ROOT = new URL("..", import.meta.url).pathname;
 const { positionals, values: flags } = parseArgs({
 	allowPositionals: true,
-	options: { out: { type: "string" }, yes: { type: "boolean", default: false } },
+	options: {
+		out: { type: "string" },
+		yes: { type: "boolean", default: false },
+		set: { type: "string", default: "all" },
+		readers: { type: "string", default: "" },
+	},
 });
 
 function env(name: string): string {
@@ -42,10 +46,14 @@ function env(name: string): string {
 	return value;
 }
 
-const routed = () =>
+/** Jev and Clairic; `truncated` is what Clairic gives for a text longer than its window. */
+const routed = (truncated: "fail" | "keep" = "fail") =>
 	routedDecider({
 		decide: piAiDecider("typesafe/jev-latest", { registry: builtinModels() }),
-		extract: extractorNamed("cloudflare/clairic", process.env),
+		extract: clairicDecider({
+			run: cloudflareRest({ accountId: env("CLOUDFLARE_ACCOUNT_ID"), apiToken: env("CLOUDFLARE_API_TOKEN") }),
+			truncated,
+		}),
 	});
 
 /** One filing of the DEF 14A set. */
@@ -55,6 +63,8 @@ const filingSchema = z.object({
 	cik: z.string(),
 	accession: z.string(),
 	document: z.string(),
+	/** "dev" filings were looked at while the harness was built; "holdout" filings only measure it. */
+	set: z.enum(["dev", "holdout"]),
 });
 type Filing = z.infer<typeof filingSchema>;
 
@@ -73,13 +83,36 @@ async function download(filing: Filing, cache: string): Promise<string> {
 }
 
 /** Writes a filing's case folder: case.json with the DEF 14A fields, and the filing as Markdown. */
-async function caseFolder(filing: Filing, out: string): Promise<{ folder: string; text: string }> {
+/**
+ * The least text of a navigated read. Clairic reads a long text with every field in one pass,
+ * but a text shorter than about 32,000 characters in a pass for every few fields, billing the text each time.
+ */
+const READ_CHARS = 40_000;
+
+/** The settings of each Clairic reader that the harness runs, by the reader's name. */
+const STRATEGIES = {
+	"whole-checked": { strategy: "whole", fields: DEF14A_CHECKED_FIELDS, checks: DEF14A_CHECKS },
+	"navigated-checked": {
+		strategy: "navigate",
+		readChars: READ_CHARS,
+		finalRead: true,
+		fields: DEF14A_CHECKED_FIELDS,
+		checks: DEF14A_CHECKS,
+	},
+} as const;
+
+/** Writes a filing's case folders, one for each strategy: case.json with the DEF 14A fields, and the filing as Markdown. */
+async function caseFolder(filing: Filing, out: string): Promise<{ folders: Record<string, string>; text: string }> {
 	const text = htmlToMarkdown(await download(filing, join(out, "filings")));
-	const folder = join(out, "cases", filing.id);
-	await mkdir(folder, { recursive: true });
-	await writeFile(join(folder, "case.json"), JSON.stringify({ id: filing.id, fields: DEF14A_FIELDS }, null, 1));
-	await writeFile(join(folder, "document.md"), text);
-	return { folder, text };
+	const folders: Record<string, string> = {};
+	for (const [reader, settings] of Object.entries(STRATEGIES)) {
+		const folder = join(out, "cases", reader, filing.id);
+		await mkdir(folder, { recursive: true });
+		await writeFile(join(folder, "case.json"), JSON.stringify({ id: filing.id, ...settings }, null, 1));
+		await writeFile(join(folder, "document.md"), text);
+		folders[reader] = folder;
+	}
+	return { folders, text };
 }
 
 /** About as many characters as Clairic's window of 65,536 tokens holds. */
@@ -99,8 +132,8 @@ function estimate(texts: readonly string[]): number {
 	const chars = texts.reduce((sum, text) => sum + text.length, 0);
 	const clairic = (Math.min(chars, texts.length * CLAIRIC_CHARS) / 2.3) * 0.1;
 	const llm = (Math.min(chars, texts.length * LLM.maxChars) / 3.5) * LLM.price.input;
-	// The navigated reader reads at most the whole text again, plus the decision model's picks.
-	return (clairic * 2 + llm) / 1_000_000;
+	// The whole-checked reader reads the text once more, and the navigated one may read it twice.
+	return (clairic * 4 + llm) / 1_000_000;
 }
 
 interface Row {
@@ -110,20 +143,28 @@ interface Row {
 	readonly scores: FieldScore[];
 }
 
-async function readAll(filing: Filing, folder: string, text: string, out: string): Promise<Row[]> {
+async function readAll(filing: Filing, folders: Record<string, string>, text: string, out: string): Promise<Row[]> {
 	const expected = (await loadExpected(join(ROOT, "eval", "def14a", filing.id))).values;
 	const run = cloudflareRest({ accountId: env("CLOUDFLARE_ACCOUNT_ID"), apiToken: env("CLOUDFLARE_API_TOKEN") });
 	const llm = { ...LLM, apiKey: process.env["MISTRAL_API_KEY"] ?? "set-by-proxy" };
 	const readers: [string, () => Promise<Reading>][] = [
 		["whole-clairic", () => wholeClairic(run, text, DEF14A_FIELDS)],
-		[
-			"navigated-clairic",
-			() => navigated(routed(), folder, join(out, "navigated", `${filing.id}-${String(Date.now())}`)),
-		],
+		...Object.entries(folders).map(([reader, folder]): [string, () => Promise<Reading>] => [
+			reader,
+			() => {
+				const truncated = reader.startsWith("whole") ? "keep" : "fail";
+				return navigated(
+					routed(truncated),
+					folder,
+					join(out, "runs", reader, `${filing.id}-${String(Date.now())}`),
+				);
+			},
+		]),
 		["structured-llm", () => structuredLlm(llm, text, DEF14A_FIELDS)],
 	];
 	const rows: Row[] = [];
-	for (const [reader, read] of readers) {
+	const only = flags.readers === "" ? null : flags.readers.split(",");
+	for (const [reader, read] of readers.filter(([name]) => only === null || only.includes(name))) {
 		const reading = await read();
 		rows.push({ filing: filing.id, reader, reading, scores: scoreOutcome({ values: reading.values }, expected) });
 		process.stderr.write(`${filing.id} ${reader}: ${JSON.stringify(summary(rows.at(-1)?.scores ?? []))}\n`);
@@ -135,9 +176,10 @@ async function filingsOf(): Promise<Filing[]> {
 	const set = join(ROOT, "eval", "def14a");
 	const entries = await readdir(set, { withFileTypes: true });
 	const ids = entries.filter((entry) => entry.isDirectory()).map((entry) => entry.name);
-	return Promise.all(
+	const filings = await Promise.all(
 		ids.map(async (id) => filingSchema.parse(JSON.parse(await readFile(join(set, id, "filing.json"), "utf8")))),
 	);
+	return filings.filter((filing) => flags.set === "all" || filing.set === flags.set);
 }
 
 /** Downloads and splits every filing, with no model call: what a person reads to label it. */
@@ -158,7 +200,7 @@ async function def14a(out: string): Promise<JsonObject> {
 	process.stderr.write(`estimated cost: $${cost.toFixed(2)}\n`);
 	if (cost > 5 && !flags.yes) throw new Error("the eval would cost more than $5; pass --yes to run it");
 	const rows: Row[] = [];
-	for (const { filing, folder, text } of folders) rows.push(...(await readAll(filing, folder, text, out)));
+	for (const { filing, folders: own, text } of folders) rows.push(...(await readAll(filing, own, text, out)));
 	return reportOf(rows);
 }
 
