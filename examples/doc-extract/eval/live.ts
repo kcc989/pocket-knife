@@ -116,7 +116,10 @@ async function readAll(filing: Filing, folder: string, text: string, out: string
 	const llm = { ...LLM, apiKey: process.env["MISTRAL_API_KEY"] ?? "set-by-proxy" };
 	const readers: [string, () => Promise<Reading>][] = [
 		["whole-clairic", () => wholeClairic(run, text, DEF14A_FIELDS)],
-		["navigated-clairic", () => navigated(routed(), folder, join(out, "navigated"))],
+		[
+			"navigated-clairic",
+			() => navigated(routed(), folder, join(out, "navigated", `${filing.id}-${String(Date.now())}`)),
+		],
 		["structured-llm", () => structuredLlm(llm, text, DEF14A_FIELDS)],
 	];
 	const rows: Row[] = [];
@@ -189,6 +192,7 @@ function reportOf(rows: readonly Row[]): JsonObject {
 		cost: row.reading.cost,
 		truncated: row.reading.truncated,
 		error: row.reading.error,
+		values: row.reading.values,
 		misses: row.scores
 			.filter((score) => !score.correct)
 			.map((score) => ({

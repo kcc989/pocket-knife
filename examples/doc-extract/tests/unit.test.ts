@@ -145,6 +145,9 @@ describe("scoring", () => {
 		expect(matches(1851, 1850)).toBe(false);
 		expect(matches("x", 1)).toBe(false);
 		expect(matches(" Bluefin  Cafe. ", "bluefin cafe")).toBe(true);
+		expect(matches("Senior Vice President – CFO & Treasurer", "Senior Vice President - CFO and Treasurer")).toBe(
+			true,
+		);
 		expect(matches(null, null)).toBe(true);
 		expect(matches("a", null)).toBe(false);
 		expect(matches(["a"], ["a"])).toBe(true);

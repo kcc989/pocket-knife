@@ -558,3 +558,18 @@ another. A cutoff such as "act above 0.9" has to be tested on the caller's own e
 - pi-ai 1.4.0 (`@earendil-works/pi-ai`): its README, section "Classification", its types in `dist/types.d.ts`, and its
   classifier APIs in `dist/api/`: `system-one-shared`, `typesafe-system-one`, `cloudflare-workers-ai-system-one`,
   `openai-decisions` and `llama-cpp-classify`.
+
+## Value questions and extractors
+
+A decision model answers bool, choice and score questions. A domain may also ask a **value question**,
+`{ type: "value", kind, instructions, field? }`, with `kind` one of text, number, date, time, datetime, duration, list,
+estimate and forecast. An extractor model answers it with
+`{ type: "value", kind, value, confidence?, pNull?, guess?, span?, spans?, median?, p10?, p90? }`, where `value` is
+null when the text does not give it. The view may hold `extractText`, the text that the extractor reads and that its
+spans point into; the decision model never sees it.
+
+`clairicDecider` (in `@osolmaz/switch/models`) answers value questions with Cloudflare's Clairic, over `env.AI.run` or
+`cloudflareRest`. `routedDecider({ decide, extract })` sends a request's value questions to the extractor and the
+others to the decision model, both at once, and joins their answers and usage; a failure of either fails the request.
+`run` and `replay` take `--extractor cloudflare/clairic`, with `CLOUDFLARE_ACCOUNT_ID` and `CLOUDFLARE_API_TOKEN`.
+The [doc-extract example](../examples/doc-extract/README.md) uses both models.
