@@ -1,0 +1,8 @@
+{
+	"id": "notice",
+	"fields": {
+		"unit": { "kind": "text", "instructions": "The apartment unit" },
+		"new_rent": { "kind": "number", "instructions": "The new monthly rent", "field": { "unit": "USD" } },
+		"effective_date": { "kind": "date", "instructions": "The date the new rent starts" }
+	}
+}

@@ -1,0 +1,8 @@
+# Words of the doc-extract domain, which switch and the viewer must not use. switch's word test reads this file.
+doc-extract
+invoice
+receipt
+salary
+proxy
+edgar
+doubtful

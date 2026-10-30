@@ -1,0 +1,66 @@
+typescript:
+  coverage:
+    threshold: 85
+  complexity:
+    max: 8
+  dry:
+    max_findings: 0
+    paths:
+      - src
+      - viewer
+      - examples
+    exclude:
+      - "**/*.test.ts"
+      - "**/node_modules/**"
+      - "dist/**"
+      - "coverage/**"
+      - pattern: "examples/*/eslint.config.mjs"
+        reason: Each example is a project of its own, as one outside switch would be, so it keeps its own copy of switch's lint rules.
+      - pattern: "examples/*/vitest.config.ts"
+        reason: Each example is a project of its own, as one outside switch would be, so it keeps its own copy of the test settings.
+      - pattern: "viewer/eslint.config.mjs"
+        reason: The viewer is a project of its own, as one outside switch would be, so it keeps its own copy of switch's lint rules.
+      - pattern: "viewer/vitest.config.ts"
+        reason: The viewer is a project of its own, as one outside switch would be, so it keeps its own copy of the test settings.
+      - pattern: "viewer/tests/helpers/**"
+        reason: The viewer's tests run switch's toy domain of facts, which they keep a copy of, as a project outside switch would.
+    copied_blocks:
+      enabled: true
+      min_tokens: 100
+  mutation:
+    targets:
+      - src/core/choices.ts
+      - src/core/loop.ts
+  dependency_boundaries:
+    - from: src/core
+      allow:
+        - src/core
+    - from: src/models
+      allow:
+        - src/models
+        - src/core
+    - from: src/testing
+      allow:
+        - src/testing
+        - src/core
+    - from: src/cli
+      allow:
+        - src/cli
+        - src/core
+        - src/models
+    - from: viewer
+      allow:
+        - viewer
+    - from: examples/chess
+      allow:
+        - examples/chess
+    - from: examples/rubric-judge
+      allow:
+        - examples/rubric-judge
+    - from: examples/wikirace
+      allow:
+        - examples/wikirace
+rules:
+  ts.mutation-required:
+    disabled: true
+    reason: The owner turned mutation tests off in CI on 2026-10-26 because they made every run slow; pnpm mutate still runs them locally.

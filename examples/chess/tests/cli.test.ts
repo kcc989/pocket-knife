@@ -1,0 +1,70 @@
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { hashOf } from "@osolmaz/switch";
+import { resultSchema, runCases, runRecordSchema } from "@osolmaz/switch/cli";
+import { route } from "@osolmaz/switch-viewer";
+import { fakeDecider } from "@osolmaz/switch/testing";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { LIMITS, TEXTS } from "../src/index.ts";
+import { chessSetup } from "../src/setup.ts";
+import { chessViewer } from "../src/viewer.ts";
+import { choosing } from "./helpers/chess.ts";
+
+let folder = "";
+beforeEach(async () => {
+	folder = await mkdtemp(join(tmpdir(), "chess-cli-"));
+});
+afterEach(async () => {
+	await rm(folder, { recursive: true, force: true });
+});
+
+/** A run of chess games `ids`, in which the model resigns at once. */
+async function chessRun(ids: readonly string[]): Promise<string> {
+	const folders = await Promise.all(
+		ids.map(async (id) => {
+			const game = join(folder, "games", id);
+			await mkdir(game, { recursive: true });
+			await writeFile(join(game, "case.json"), JSON.stringify({ id, side: "white", seed: 1 }));
+			return game;
+		}),
+	);
+	const out = join(folder, "run");
+	const lines: string[] = [];
+	await runCases(await chessSetup(), folders, fakeDecider(choosing("resign")), {
+		out,
+		concurrency: 1,
+		progress: (line) => lines.push(line),
+	});
+	expect(lines).toEqual(
+		ids.map((id) => expect.stringContaining(`${id}: 1 steps, {"result":"loss","reason":"resignation"`) as unknown),
+	);
+	return out;
+}
+
+describe("the chess harness", () => {
+	it("records a game's outcome, and its texts and limits as its definition", async () => {
+		const out = await chessRun(["g1"]);
+		const result = resultSchema.parse(JSON.parse(await readFile(join(out, "cases", "g1", "result.json"), "utf8")));
+		expect(result.outcome).toMatchObject({ result: "loss", reason: "resignation", moves: 0 });
+		const { definition } = runRecordSchema.parse(JSON.parse(await readFile(join(out, "run.json"), "utf8")));
+		const content = { ...TEXTS, limits: { ...LIMITS } };
+		expect(definition).toEqual({ name: "chess", hash: hashOf(content), content });
+		expect(content).toMatchObject({ resign: "Resign the game", choices: 220 });
+	});
+
+	it("serves a game's page with the chess part, its pieces, its styles and its summary in the index", async () => {
+		const out = await chessRun(["g1", "g 2"]);
+		expect((await route(out, "/", { chess: chessViewer })).body).toContain(
+			'<a href="/case/g%202">g 2</a> <span class="meta">loss · resignation</span>',
+		);
+		const page = await route(out, "/case/g1", { chess: chessViewer });
+		expect(page.body).toContain('registerPart("chess", chessPart)');
+		expect(page.body).toContain("data:image/svg+xml;base64,");
+		expect(page.body).toContain(".board {");
+		expect(page.body).toContain(':root[data-domain="chess"] {');
+		const plain = (await route(out, "/case/g1")).body;
+		expect(plain).not.toContain("data:image/svg+xml;base64,");
+		expect(plain).not.toContain(".board");
+	});
+});
