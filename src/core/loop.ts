@@ -193,6 +193,8 @@ function fitAnswer(id: string, question: Question, before: Question | undefined,
 	if (answer.type !== question.type) {
 		throw new ReplayError(`the trace has a ${answer.type} answer to ${id}, which is a ${question.type} question now`);
 	}
+	const misfit = kindMisfit(id, question, answer);
+	if (misfit !== null) throw new ReplayError(`the trace does not fit: ${misfit}`);
 	return answer.type === "choice" && question.type === "choice" ? fitChoice(id, question, before, answer) : answer;
 }
 
@@ -269,7 +271,10 @@ async function askModel<S extends JsonObject>(loop: Loop<S>, state: S, questions
 	return { answers: Object.fromEntries(ordered), repeated: false };
 }
 
-/** Why an answer does not fit its question: missing, of another type, or a choice that is none of the labels. */
+/**
+ * Why an answer does not fit its question: missing, of another type, a choice that is none of the labels, or a value
+ * of another kind.
+ */
 function misfitOf(id: string, question: Question, answer: Answer | undefined): string | null {
 	if (answer === undefined) return `no answer to ${id}`;
 	if (answer.type !== question.type)
@@ -277,7 +282,13 @@ function misfitOf(id: string, question: Question, answer: Answer | undefined): s
 	if (answer.type === "choice" && question.type === "choice" && !Object.hasOwn(question.criteria, answer.choice)) {
 		return `the model answered ${answer.choice} to ${id}, which is none of its labels`;
 	}
-	return null;
+	return kindMisfit(id, question, answer);
+}
+
+/** Why a value answer is of another kind than its question asks; null when it is not a value answer or it fits. */
+export function kindMisfit(id: string, question: Question, answer: Answer): string | null {
+	if (answer.type !== "value" || question.type !== "value" || answer.kind === question.kind) return null;
+	return `the answer to ${id} is a ${answer.kind} value, not a ${question.kind} one`;
 }
 
 /** Questions in groups whose estimated size stays under `room` tokens; a single larger question gets its own group. */
@@ -309,9 +320,12 @@ function viewOf<S extends JsonObject>(
 	return machine.view(state, tokens, charsPerToken);
 }
 
-/** The view as the request takes it: its state, and its images when it has any, without anything else it holds. */
-const requestOf = ({ decisionState, decisionImages }: View): View =>
-	decisionImages === undefined ? { decisionState } : { decisionState, decisionImages };
+/** The view as the request takes it: its state, its images and its text to extract from, without anything else. */
+const requestOf = ({ decisionState, decisionImages, extractText }: View): View => ({
+	decisionState,
+	...(decisionImages === undefined ? {} : { decisionImages }),
+	...(extractText === undefined ? {} : { extractText }),
+});
 
 /**
  * Sends one decision request: the view and `questions`. When the model reports that the request did not fit its

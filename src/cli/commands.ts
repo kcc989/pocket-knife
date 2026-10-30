@@ -1,11 +1,10 @@
 import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { basename, resolve } from "node:path";
-import type { z } from "zod";
 import {
 	type Decider,
-	type DecisionUsage,
-	type decisionUsageSchema,
 	type Limits,
+	noUsage,
+	addedUsage,
 	parseRequests,
 	parseTrace,
 	recordedModel,
@@ -221,49 +220,12 @@ async function startRun(out: string, record: RunRecord): Promise<RunRecord> {
 	return { ...record, started: before.started };
 }
 
-const noUsage = (): DecisionUsage => ({
-	input: 0,
-	output: 0,
-	cacheRead: 0,
-	cacheWrite: 0,
-	totalTokens: 0,
-	cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
-});
-
-/** The sum of a count that only some providers report; none while neither usage has it. */
-const optionalSum = (a?: number, b?: number): number | undefined =>
-	a === undefined && b === undefined ? undefined : (a ?? 0) + (b ?? 0);
-
-/** The sum of two usages; a request without usage adds nothing. */
-function added(sum: DecisionUsage, usage: z.infer<typeof decisionUsageSchema> | undefined): DecisionUsage {
-	if (usage === undefined) return sum;
-	const { cost } = usage;
-	const cacheWrite1h = optionalSum(sum.cacheWrite1h, usage.cacheWrite1h);
-	const reasoning = optionalSum(sum.reasoning, usage.reasoning);
-	return {
-		input: sum.input + usage.input,
-		output: sum.output + usage.output,
-		cacheRead: sum.cacheRead + usage.cacheRead,
-		cacheWrite: sum.cacheWrite + usage.cacheWrite,
-		...(cacheWrite1h === undefined ? {} : { cacheWrite1h }),
-		...(reasoning === undefined ? {} : { reasoning }),
-		totalTokens: sum.totalTokens + usage.totalTokens,
-		cost: {
-			input: sum.cost.input + cost.input,
-			output: sum.cost.output + cost.output,
-			cacheRead: sum.cost.cacheRead + cost.cacheRead,
-			cacheWrite: sum.cost.cacheWrite + cost.cacheWrite,
-			total: sum.cost.total + cost.total,
-		},
-	};
-}
-
 /** The totals of every case in the run folder: from their results, and from every request in their requests files. */
 async function totals(out: string): Promise<NonNullable<RunRecord["totals"]>> {
 	let sum = { cases: 0, failed: 0, requests: 0, usage: noUsage() };
 	for (const result of await readResults(out)) {
 		const requests = parseRequests(await readFile(caseFiles(out, result.case).requests, "utf8"));
-		const usage = requests.reduce((total, recorded) => added(total, recorded.result.decisionUsage), sum.usage);
+		const usage = requests.reduce((total, recorded) => addedUsage(total, recorded.result.decisionUsage), sum.usage);
 		sum = {
 			cases: sum.cases + 1,
 			failed: sum.failed + (failed(result) ? 1 : 0),

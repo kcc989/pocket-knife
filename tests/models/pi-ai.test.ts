@@ -120,6 +120,23 @@ describe("piAiDecider", () => {
 		expect(aborted).not.toHaveProperty("errorMessage");
 	});
 
+	it("answers no value question, and sends nothing to pi-ai when a request has one", async () => {
+		const fake = registry({});
+		const result = await piAiDecider("typesafe/jev-latest", { registry: fake }).decide({
+			...request,
+			decisionQuestions: {
+				...request.decisionQuestions,
+				total: { type: "value", kind: "number", instructions: "T" },
+			},
+		});
+		expect(result).toMatchObject({
+			stopReason: "error",
+			errorMessage: "a classifier model answers no value questions (total); route them to an extractor",
+			decisionAnswers: {},
+		});
+		expect(fake.contexts).toEqual([]);
+	});
+
 	it("refuses a model name without a provider or a model pi-ai does not list", () => {
 		expect(() => piAiDecider("jev-latest", { registry: registry({}) })).toThrow(ModelNotFoundError);
 		expect(() => piAiDecider("typesafe/other", { registry: registry({}) })).toThrow(/lists no classifier model/);

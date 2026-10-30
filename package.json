@@ -39,9 +39,9 @@
 			"default": "./dist/src/cli/index.js"
 		},
 		"./models": {
-			"switch-source": "./src/models/pi-ai.ts",
-			"types": "./dist/src/models/pi-ai.d.ts",
-			"default": "./dist/src/models/pi-ai.js"
+			"switch-source": "./src/models/index.ts",
+			"types": "./dist/src/models/index.d.ts",
+			"default": "./dist/src/models/index.js"
 		},
 		"./testing": {
 			"switch-source": "./src/testing/index.ts",

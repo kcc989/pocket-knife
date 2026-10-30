@@ -54,6 +54,7 @@ export const pickOf = (frame: Frame | null): FrameQuestion | null =>
 export function answerText(answer: Answer): string {
 	if (answer.type === "bool") return `yes ${percent(answer.probability)}`;
 	if (answer.type === "choice") return `${answer.choice} ${percent(answer.probabilities[answer.choice] ?? null)}`;
+	if (answer.type === "value") return `${plain(answer.value)} (confidence ${percent(answer.confidence ?? null)})`;
 	return `${answer.score.toFixed(2)} (confidence ${percent(answer.confidence)})`;
 }
 

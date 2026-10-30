@@ -48,6 +48,8 @@ describe("text", () => {
 		expect(answerText({ type: "choice", choice: "b", probabilities: { b: 0.6 }, confidence: 0.4 })).toBe("b 60.0%");
 		expect(answerText({ type: "choice", choice: "c", probabilities: {}, confidence: 0 })).toBe("c –");
 		expect(answerText({ type: "score", score: 1.5, confidence: 0.4 })).toBe("1.50 (confidence 40.0%)");
+		expect(answerText({ type: "value", kind: "number", value: 12, confidence: 0.5 })).toBe("12 (confidence 50.0%)");
+		expect(answerText({ type: "value", kind: "list", value: ["a", "b"] })).toBe("a, b (confidence –)");
 		expect(plain([1, "a", { b: true }])).toBe("1, a, b true");
 		expect(plain(null)).toBe("null");
 	});

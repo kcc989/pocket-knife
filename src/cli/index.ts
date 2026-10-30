@@ -16,6 +16,7 @@ export {
 	setupOf,
 } from "./domains.ts";
 export { caseFiles, casesFolder, runFile } from "./layout.ts";
+export { extractorNamed, withExtractor } from "./extractor.ts";
 export { commandLine } from "./program.ts";
 export {
 	type CaseResult,

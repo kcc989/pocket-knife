@@ -49,7 +49,29 @@ export interface ScoreQuestion extends QuestionBase {
 	readonly type: "score";
 	readonly criteria: readonly string[];
 }
-export type Question = BoolQuestion | ChoiceQuestion | ScoreQuestion;
+/** The kinds of value that a value question asks for. */
+export const VALUE_KINDS = [
+	"text",
+	"number",
+	"date",
+	"time",
+	"datetime",
+	"duration",
+	"list",
+	"estimate",
+	"forecast",
+] as const;
+export type ValueKind = (typeof VALUE_KINDS)[number];
+/**
+ * What value the text gives: an extractor model reads the request's `extractText` and answers with a value of `kind`.
+ * `field` holds the extractor's own settings for the value, such as its unit or its range.
+ */
+export interface ValueQuestion extends QuestionBase {
+	readonly type: "value";
+	readonly kind: ValueKind;
+	readonly field?: JsonObject | undefined;
+}
+export type Question = BoolQuestion | ChoiceQuestion | ScoreQuestion | ValueQuestion;
 /** Questions by id: the answers come back under the same ids. */
 export type Questions = Readonly<Record<string, Question>>;
 
@@ -71,7 +93,27 @@ export interface ScoreAnswer {
 	readonly score: number;
 	readonly confidence: number;
 }
-export type Answer = BoolAnswer | ChoiceAnswer | ScoreAnswer;
+/** Character offsets in the request's `extractText`: the first, and the one after the last. */
+export type Span = readonly [number, number];
+/**
+ * The value that the text gives, null when the text does not determine it. `pNull` is the probability that it is null,
+ * `guess` the most likely value even so, and `span` or `spans` where the text gives it. An estimate has its median and
+ * its 80% interval from `p10` to `p90`.
+ */
+export interface ValueAnswer {
+	readonly type: "value";
+	readonly kind: ValueKind;
+	readonly value: Json;
+	readonly confidence?: number | undefined;
+	readonly pNull?: number | undefined;
+	readonly guess?: Json | undefined;
+	readonly span?: Span | undefined;
+	readonly spans?: readonly Span[] | undefined;
+	readonly median?: number | string | undefined;
+	readonly p10?: number | string | undefined;
+	readonly p90?: number | string | undefined;
+}
+export type Answer = BoolAnswer | ChoiceAnswer | ScoreAnswer | ValueAnswer;
 /** Answers by question id. */
 export type Answers = Readonly<Record<string, Answer>>;
 
@@ -83,6 +125,8 @@ export interface DecisionRequest {
 	readonly decisionImages?: readonly Image[];
 	/** pi-ai's `questions`, without switch's own `data`. */
 	readonly decisionQuestions: Questions;
+	/** The text that an extractor reads for the value questions, which their answers' spans point into. */
+	readonly extractText?: string;
 }
 
 /** What the view function gives: the decision request without its questions, which switch adds. */

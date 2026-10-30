@@ -5,6 +5,7 @@ import type { Decider } from "../core/index.ts";
 import { piAiDecider } from "../models/pi-ai.ts";
 import { replayCase, runCases } from "./commands.ts";
 import { domainFlags, type Domains, runnerNamed } from "./domains.ts";
+import { withExtractor } from "./extractor.ts";
 import { loadSet } from "./sets.ts";
 
 const positive = (value: string): number => {
@@ -31,12 +32,13 @@ async function casesOf(
  * The decider of `model`, with the API key from the environment variable `variable` when one is named, without the
  * white space around it. Without one, pi-ai finds the provider's key itself, such as `TYPESAFE_API_KEY`.
  */
-function decider(model: string, variable: string | undefined): Decider {
+function decider(model: string, variable: string | undefined, extractor: string | undefined): Decider {
 	const apiKey = variable === undefined ? undefined : process.env[variable]?.trim();
 	if (variable !== undefined && (apiKey === undefined || apiKey === "")) {
 		throw new InvalidArgumentError(`the environment variable ${variable} holds no API key`);
 	}
-	return piAiDecider(model, { registry: builtinModels(), ...(apiKey === undefined ? {} : { apiKey }) });
+	const decide = piAiDecider(model, { registry: builtinModels(), ...(apiKey === undefined ? {} : { apiKey }) });
+	return withExtractor(decide, extractor, process.env);
 }
 
 const progress = (line: string): void => {
@@ -44,6 +46,8 @@ const progress = (line: string): void => {
 };
 
 const DOMAIN = "the domain; the harness's only domain when it has one";
+const EXTRACTOR =
+	"the model that answers value questions, such as cloudflare/clairic with CLOUDFLARE_ACCOUNT_ID and CLOUDFLARE_API_TOKEN";
 
 interface RunFlags {
 	readonly out: string;
@@ -51,6 +55,7 @@ interface RunFlags {
 	readonly domain?: string;
 	readonly model: string;
 	readonly apiKeyEnv?: string;
+	readonly extractor?: string;
 	readonly concurrency: number;
 }
 
@@ -71,11 +76,12 @@ function runCommand(domains: Domains): Command {
 		.option("--domain <name>", DOMAIN)
 		.option("--model <provider/id>", "a pi-ai classifier model", "typesafe/jev-latest")
 		.option("--api-key-env <variable>", "the environment variable that holds the API key")
+		.option("--extractor <provider/id>", EXTRACTOR)
 		.option("--concurrency <n>", "cases at once", positive, 4);
 	return withDomainFlags(command, domains).action(async (cases: string[], options: RunFlags, self: Command) => {
 		const { folders, set } = await casesOf(cases, options.set);
 		const domain = await runnerNamed(domains, options.domain, self.opts());
-		const model = decider(options.model, options.apiKeyEnv);
+		const model = decider(options.model, options.apiKeyEnv, options.extractor);
 		await runCases(domain, folders, model, {
 			out: options.out,
 			concurrency: options.concurrency,
@@ -90,6 +96,7 @@ interface ReplayFlags {
 	readonly fork?: number;
 	readonly model: string;
 	readonly apiKeyEnv?: string;
+	readonly extractor?: string;
 	readonly out?: string;
 }
 
@@ -104,13 +111,16 @@ function replayCommand(domains: Domains): Command {
 		.option("--fork <steps>", "repeat this many recorded steps, then let --model answer", positive)
 		.option("--model <provider/id>", "the model for a fork", "typesafe/jev-latest")
 		.option("--api-key-env <variable>", "the environment variable that holds the API key")
+		.option("--extractor <provider/id>", EXTRACTOR)
 		.option("--out <folder>", "write the replay to this run folder, as a run of one case");
 	return withDomainFlags(command, domains).action(
 		async (folder: string, trace: string, options: ReplayFlags, self: Command) => {
 			const domain = await runnerNamed(domains, options.domain, self.opts());
 			const { fork, out } = options;
 			const result = await replayCase(domain, folder, trace, {
-				...(fork === undefined ? {} : { fork, decider: decider(options.model, options.apiKeyEnv) }),
+				...(fork === undefined
+					? {}
+					: { fork, decider: decider(options.model, options.apiKeyEnv, options.extractor) }),
 				...(out === undefined ? {} : { out }),
 			});
 			process.stdout.write(`${JSON.stringify(result, null, 1)}\n`);

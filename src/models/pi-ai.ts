@@ -6,7 +6,7 @@ import type {
 	ClassifierResult,
 	ModelsClassifierOptions,
 } from "@earendil-works/pi-ai";
-import type { Decider, DecisionRequest, DecisionResult, Question } from "../core/index.ts";
+import type { Decider, DecisionRequest, DecisionResult, Question, Questions, ValueQuestion } from "../core/index.ts";
 
 /** The part of pi-ai's model registry that switch uses; tests pass a fake. */
 export interface ClassifierRegistry {
@@ -55,6 +55,8 @@ export function piAiDecider(name: string, options: PiAiDeciderOptions): Decider 
 		window: model.contextWindow,
 		charsPerToken: options.charsPerToken ?? 3,
 		async decide(request: DecisionRequest): Promise<DecisionResult> {
+			const values = valueIds(request.decisionQuestions);
+			if (values.length > 0) return refused(model, values);
 			const started = now();
 			const result = await options.registry.classify(model, contextOf(request), requestOptions);
 			return resultOf(result, now() - started);
@@ -62,17 +64,37 @@ export function piAiDecider(name: string, options: PiAiDeciderOptions): Decider 
 	};
 }
 
+const valueIds = (questions: Questions): string[] =>
+	Object.entries(questions).flatMap(([id, question]) => (question.type === "value" ? [id] : []));
+
+/** A classifier answers no value question: an extractor does, such as through `routedDecider`. */
+function refused(model: ClassifierModel<ClassifierApi>, ids: readonly string[]): DecisionResult {
+	return {
+		decisionAnswers: {},
+		api: model.api,
+		provider: model.provider,
+		model: model.id,
+		stopReason: "error",
+		errorMessage: `a classifier model answers no value questions (${ids.join(", ")}); route them to an extractor`,
+		timestamp: Date.now(),
+		tooLong: false,
+		milliseconds: 0,
+	};
+}
+
 /** pi-ai's context: the decision request's state, images and questions, with each image's label left out. */
 function contextOf(request: DecisionRequest): ClassifierContext {
 	const questions = Object.fromEntries(
-		Object.entries(request.decisionQuestions).map(([id, question]) => [id, questionOf(question)]),
+		Object.entries(request.decisionQuestions).flatMap(([id, question]) =>
+			question.type === "value" ? [] : [[id, questionOf(question)] as const],
+		),
 	);
 	const images = request.decisionImages?.map(({ type, data, mimeType }) => ({ type, data, mimeType }));
 	return { state: request.decisionState, questions, ...(images === undefined ? {} : { images }) };
 }
 
 /** The same question, as pi-ai's mutable type takes it. */
-function questionOf(question: Question): ClassifierQuestion {
+function questionOf(question: Exclude<Question, ValueQuestion>): ClassifierQuestion {
 	switch (question.type) {
 		case "bool":
 			return { ...question, criteria: { ...question.criteria } };

@@ -1,5 +1,5 @@
 import { z } from "zod";
-import type { Answers, Ending, Json, JsonObject, Questions } from "./types.ts";
+import { type Answers, type Ending, type Json, type JsonObject, type Questions, VALUE_KINDS } from "./types.ts";
 
 /** A JSON value, as the core types it. */
 const json: z.ZodType<Json> = z.json();
@@ -7,11 +7,15 @@ const jsonObject = z.record(z.string(), json);
 const text = z.string();
 /** switch's own facts about a question, which the model never sees. */
 const data = jsonObject.optional();
+const kind = z.enum(VALUE_KINDS);
+const span = z.tuple([z.number().int(), z.number().int()]).readonly();
+const point = z.union([z.number(), z.string()]).optional();
 
 export const questionSchema = z.discriminatedUnion("type", [
 	z.object({ type: z.literal("bool"), instructions: text, criteria: z.object({ true: text, false: text }), data }),
 	z.object({ type: z.literal("choice"), instructions: text, criteria: z.record(z.string(), text), data }),
 	z.object({ type: z.literal("score"), instructions: text, criteria: z.array(text).readonly(), data }),
+	z.object({ type: z.literal("value"), instructions: text, kind, field: jsonObject.optional(), data }),
 ]);
 const questions = z.record(z.string(), questionSchema);
 export const answerSchema = z.discriminatedUnion("type", [
@@ -23,6 +27,19 @@ export const answerSchema = z.discriminatedUnion("type", [
 		confidence: z.number(),
 	}),
 	z.object({ type: z.literal("score"), score: z.number(), confidence: z.number() }),
+	z.object({
+		type: z.literal("value"),
+		kind,
+		value: json,
+		confidence: z.number().optional(),
+		pNull: z.number().optional(),
+		guess: json.optional(),
+		span: span.optional(),
+		spans: z.array(span).readonly().optional(),
+		median: point,
+		p10: point,
+		p90: point,
+	}),
 ]);
 const answers = z.record(z.string(), answerSchema);
 export const endingSchema = z.enum(["done", "step limit", "failed"]);

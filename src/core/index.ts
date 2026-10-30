@@ -9,7 +9,7 @@ export {
 } from "./choice-types.ts";
 export { definitionFor, definitionOf, hashOf, limitsJson } from "./definition.ts";
 export { type CaseOptions, type CaseRun, type Runner, runnerOf } from "./domain.ts";
-export { batches, type DomainShared, estimateTokens, run, type RunOptions } from "./loop.ts";
+export { batches, type DomainShared, estimateTokens, kindMisfit, run, type RunOptions } from "./loop.ts";
 export {
 	ChoiceError,
 	offerChoices,
@@ -48,3 +48,4 @@ export {
 	type TraceEntry,
 } from "./trace.ts";
 export * from "./types.ts";
+export { addedUsage, noUsage } from "./usage.ts";

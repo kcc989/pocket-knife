@@ -1,4 +1,12 @@
-import type { Answer, Answers, Decider, DecisionRequest, DecisionResult, DecisionUsage } from "../core/index.ts";
+import type {
+	Answer,
+	Answers,
+	Decider,
+	DecisionRequest,
+	DecisionResult,
+	DecisionUsage,
+	Question,
+} from "../core/index.ts";
 
 /** What a fake request costs: 10 input tokens at a tenth of a cent. */
 export const FAKE_USAGE: DecisionUsage = {
@@ -47,26 +55,32 @@ export const answered = (answers: Answers): DecisionResult => ({
 
 /**
  * Answers every bool question with `probability`, every choice question with `pick(labels)` at probability 0.9, the
- * last label by default, and every score question with 1.
+ * last label by default, every score question with 1, and every value question with null.
  */
 export function answering(
 	probability: number,
 	pick: (labels: string[]) => string = (labels) => labels.at(-1) ?? "",
 ): Policy {
-	return (request) => {
-		const answers: Record<string, Answer> = {};
-		for (const [id, question] of Object.entries(request.decisionQuestions)) {
-			if (question.type === "choice") {
+	const answerOf = (question: Question): Answer => {
+		switch (question.type) {
+			case "choice": {
 				const choice = pick(Object.keys(question.criteria));
-				answers[id] = { type: "choice", choice, probabilities: { [choice]: 0.9 }, confidence: 0.8 };
-			} else if (question.type === "bool") {
-				answers[id] = { type: "bool", probability };
-			} else {
-				answers[id] = { type: "score", score: 1, confidence: 0.5 };
+				return { type: "choice", choice, probabilities: { [choice]: 0.9 }, confidence: 0.8 };
 			}
+			case "bool":
+				return { type: "bool", probability };
+			case "score":
+				return { type: "score", score: 1, confidence: 0.5 };
+			case "value":
+				return { type: "value", kind: question.kind, value: null, pNull: 1, confidence: 0.5 };
 		}
-		return answered(answers);
 	};
+	return (request) =>
+		answered(
+			Object.fromEntries(
+				Object.entries(request.decisionQuestions).map(([id, question]) => [id, answerOf(question)]),
+			),
+		);
 }
 
 /** A failed request, as a decider reports it; `tooLong` when the request did not fit the model's window. */
