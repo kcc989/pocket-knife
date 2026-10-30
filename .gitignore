@@ -1,0 +1,18 @@
+node_modules/
+dist/
+coverage/
+reports/
+.stryker-tmp/
+
+# Task data never goes into this repository: input folders, case folders, run results, traces and labels.
+input/
+inputs/
+cases/
+# The chess example's cases are public game setups, and the wikirace example's are pairs of Wikipedia titles: not task
+# data.
+!examples/chess/cases/
+!examples/wikirace/cases/
+results/
+out/
+*.trace.jsonl
+labels*.jsonl
