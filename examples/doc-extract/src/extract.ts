@@ -52,7 +52,7 @@ export const LIMITS: Limits = { steps: 120, windowShare: 0.9 };
 
 export const TEXTS = {
 	instructions:
-		"You look for the values listed under missing_values in a document split into parts. Pick the unread part most likely to hold one or more missing values, judging by its heading and its first words. Stop when no unread part is likely to hold any of them.",
+		"Pick the part whose heading or first words mention one of the missing values. Stop only when no unread part mentions any of them.",
 	stop: "Stop reading: no unread part is likely to hold a missing value",
 	choices: 255,
 	preview: 160,
