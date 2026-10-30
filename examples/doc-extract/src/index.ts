@@ -26,3 +26,4 @@ export {
 export { type Part, preview, splitParts, START } from "./parts.ts";
 export { docExtractSetup } from "./setup.ts";
 export { BUCKETS, calibration, type FieldScore, matches, numberOf, scoreOutcome, summary } from "./score.ts";
+export { decodeEntities, htmlToMarkdown, tableLines } from "./html.ts";

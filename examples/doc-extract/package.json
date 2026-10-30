@@ -16,6 +16,7 @@
 		"eval": "node --conditions=switch-source eval/live.ts"
 	},
 	"dependencies": {
+		"@earendil-works/pi-ai": "1.4.0",
 		"@osolmaz/switch": "workspace:*",
 		"zod": "4.6.7"
 	},
