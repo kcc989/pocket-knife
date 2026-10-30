@@ -2,6 +2,7 @@ import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { VALUE_KINDS } from "@osolmaz/switch";
 import { z } from "zod";
+import { checkSchema } from "./checks.ts";
 
 const json = z.json();
 
@@ -20,6 +21,19 @@ export const caseSchema = z
 	.object({
 		id: z.string().min(1),
 		document: z.string().min(1).default("document.md"),
+		/** A read takes the picked part and the parts after it until it holds this many characters; 0 reads one part. */
+		readChars: z.number().int().nonnegative().default(0),
+		/** After the model stops, read every part read at once, and take those answers as the values. */
+		finalRead: z.boolean().default(false),
+		/**
+		 * "navigate" picks one part at a time; "select" asks of every part at once, then reads the likeliest; "whole" reads
+		 * the whole document at once.
+		 */
+		strategy: z.enum(["navigate", "select", "whole"]).default("navigate"),
+		/** The most characters that the select strategy reads. */
+		selectChars: z.number().int().positive().default(60_000),
+		/** Sum checks: values that add up are found, however sure the extractor was of each. */
+		checks: z.array(checkSchema).default([]),
 		fields: z.record(z.string(), fieldSchema).refine((fields) => Object.keys(fields).length > 0, "no fields"),
 	})
 	.strict();

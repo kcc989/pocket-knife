@@ -1,11 +1,12 @@
 import type { Json, JsonObject } from "@osolmaz/switch";
 
-/** Text as it compares: lower case, one kind of dash, "and" for "&", single spaces, no punctuation at its ends. */
+/** Text as it compares: lower case, one kind of dash, "and" for "&", no spaces around "/", single spaces, no punctuation at its ends. */
 const plainText = (text: string): string =>
 	text
 		.toLowerCase()
 		.replace(/[\u2010-\u2015]/g, "-")
 		.replace(/\s*&\s*/g, " and ")
+		.replace(/\s*\/\s*/g, "/")
 		.replace(/\s+/g, " ")
 		.replace(/^[\s.,;:"'()]+|[\s.,;:"'()]+$/g, "");
 
