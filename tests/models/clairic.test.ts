@@ -58,7 +58,7 @@ describe("clairicDecider", () => {
 	it("sends value questions as Clairic's fields, over the text to extract from and the images as data URLs", async () => {
 		const fake = fakeRun(OUTPUT);
 		const decider = clairicDecider({ run: fake.run });
-		expect(decider).toMatchObject({ model: "cloudflare/clairic", window: 65_536, charsPerToken: 2.3 });
+		expect(decider).toMatchObject({ model: "cloudflare/clairic", window: 65_536, charsPerToken: 4 });
 		await decider.decide(request);
 		expect(fake.inputs).toEqual([
 			{
@@ -145,6 +145,13 @@ describe("clairicDecider", () => {
 		const result = await clairicDecider({ run: fakeRun({ ...OUTPUT, truncated: true }).run }).decide(request);
 		expect(result).toMatchObject({ stopReason: "error", tooLong: true, decisionAnswers: {} });
 		expect(result.decisionUsage?.input).toBe(2_000_000);
+	});
+
+	it("keeps a truncated read's answers when asked to", async () => {
+		const run = fakeRun({ ...OUTPUT, truncated: true }).run;
+		const result = await clairicDecider({ run, truncated: "keep" }).decide(request);
+		expect(result).toMatchObject({ stopReason: "stop", tooLong: false });
+		expect(Object.keys(result.decisionAnswers)).toHaveLength(5);
 	});
 
 	it("fails a request whose call throws or whose output is not Clairic's", async () => {

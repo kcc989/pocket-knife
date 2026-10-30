@@ -31,8 +31,13 @@ export type AiRun = (model: string, inputs: ClairicInput) => Promise<unknown>;
 
 export interface ClairicOptions {
 	readonly run: AiRun;
-	/** Characters per token for size estimates; Clairic counts about 2.3 for English. */
+	/** Characters per token for size estimates: Clairic counted 4.2 on English filings, and 2.3 on short dense text. */
 	readonly charsPerToken?: number;
+	/**
+	 * What a truncated read gives: "fail" fails the request as too long, so the loop sends a smaller view; "keep"
+	 * keeps the answers that Clairic gave from the start of the text, for a caller that sends a text larger than it.
+	 */
+	readonly truncated?: "fail" | "keep";
 	readonly now?: () => number;
 }
 
@@ -132,13 +137,20 @@ function failure(message: string, milliseconds: number, usage?: DecisionUsage): 
 }
 
 /** The result of Clairic's output, with each answer under its question's id. */
-function resultOf(raw: unknown, fields: ReadonlyMap<string, Field>, milliseconds: number): DecisionResult {
+function resultOf(
+	raw: unknown,
+	fields: ReadonlyMap<string, Field>,
+	milliseconds: number,
+	keepTruncated: boolean,
+): DecisionResult {
 	const parsed = outputSchema.safeParse(raw);
 	if (!parsed.success) return failure(`Clairic gave an unexpected output: ${parsed.error.message}`, milliseconds);
 	const output = parsed.data;
 	const usage = usageOf(output);
 	// A truncated state may have lost the values, so a smaller view must be sent.
-	if (output.truncated) return { ...failure("the text was too long for Clairic", milliseconds, usage), tooLong: true };
+	if (output.truncated && !keepTruncated) {
+		return { ...failure("the text was too long for Clairic", milliseconds, usage), tooLong: true };
+	}
 	const answers: Answers = Object.fromEntries(
 		Object.entries(output.answers).flatMap(([name, answer]) => {
 			const id = fields.get(name)?.id;
@@ -185,14 +197,14 @@ export function clairicDecider(options: ClairicOptions): Decider {
 	return {
 		model: "cloudflare/clairic",
 		window: WINDOW,
-		charsPerToken: options.charsPerToken ?? 2.3,
+		charsPerToken: options.charsPerToken ?? 4,
 		async decide(request) {
 			const fields = fieldsOf(request);
 			if (Array.isArray(fields)) return failure(`Clairic answers only value questions, not ${fields.join(", ")}`, 0);
 			const started = now();
 			try {
 				const raw = await options.run(CLAIRIC, inputOf(request, fields));
-				return resultOf(raw, fields, now() - started);
+				return resultOf(raw, fields, now() - started, options.truncated === "keep");
 			} catch (error: unknown) {
 				return failure(error instanceof Error ? error.message : String(error), now() - started);
 			}
